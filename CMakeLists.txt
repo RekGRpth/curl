@@ -57,7 +57,6 @@ string(REGEX MATCH "#define LIBCURL_VERSION_NUM 0x[0-9a-fA-F]+"
   CURL_VERSION_NUM ${CURL_VERSION_H_CONTENTS})
 string(REGEX REPLACE "[^0]+0x" "" CURL_VERSION_NUM ${CURL_VERSION_NUM})
 
-include_regular_expression("^.*$")    # Sukender: Is it necessary?
 
 # Setup package meta-data
 # SET(PACKAGE "curl")
@@ -104,11 +103,7 @@ endif()
 
 if(ENABLE_DEBUG)
   # DEBUGBUILD will be defined only for Debug builds
-  if(NOT CMAKE_VERSION VERSION_LESS 3.0)
-    set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Debug>:DEBUGBUILD>)
-  else()
-    set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS_DEBUG DEBUGBUILD)
-  endif()
+  set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Debug>:DEBUGBUILD>)
   set(ENABLE_CURLDEBUG ON)
 endif()
 
@@ -246,7 +241,6 @@ include(CheckLibraryExists)
 include(CheckSymbolExists)
 include(CheckTypeSize)
 include(CheckCSourceCompiles)
-include(CMakeDependentOption)
 
 # On windows preload settings
 if(WIN32)
@@ -475,6 +469,7 @@ if(NOT CURL_DISABLE_LDAP)
         list(APPEND CMAKE_REQUIRED_LIBRARIES ${CMAKE_LBER_LIB})
       endif()
       check_c_source_compiles("${_SRC_STRING}" NOT_NEED_LBER_H)
+      unset(CMAKE_REQUIRED_LIBRARIES)
 
       if(NOT_NEED_LBER_H)
         set(NEED_LBER_H OFF)
@@ -570,6 +565,7 @@ if(CMAKE_USE_LIBSSH2)
     check_function_exists(libssh2_scp_send64        HAVE_LIBSSH2_SCP_SEND64)
     check_function_exists(libssh2_session_handshake HAVE_LIBSSH2_SESSION_HANDSHAKE)
     set(CMAKE_EXTRA_INCLUDE_FILES "")
+    unset(CMAKE_REQUIRED_LIBRARIES)
   endif()
 endif()
 
@@ -617,6 +613,7 @@ if(CMAKE_USE_GSSAPI)
       if(NOT HAVE_GSS_C_NT_HOSTBASED_SERVICE)
         set(HAVE_OLD_GSSMIT ON)
       endif()
+      unset(CMAKE_REQUIRED_LIBRARIES)
 
     endif()
 
