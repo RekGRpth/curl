@@ -118,6 +118,7 @@ static CURLcode vsetopt(struct Curl_easy *data, CURLoption option,
   char *argptr;
   CURLcode result = CURLE_OK;
   long arg;
+  unsigned long uarg;
   curl_off_t bigsize;
 
   switch(option) {
@@ -128,11 +129,7 @@ static CURLcode vsetopt(struct Curl_easy *data, CURLoption option,
     data->set.dns_cache_timeout = arg;
     break;
   case CURLOPT_DNS_USE_GLOBAL_CACHE:
-#if 0 /* deprecated */
-    /* remember we want this enabled */
-    arg = va_arg(param, long);
-    data->set.global_dns_cache = (0 != arg) ? TRUE : FALSE;
-#endif
+    /* deprecated */
     break;
   case CURLOPT_SSL_CIPHER_LIST:
     /* set a list of cipher we want to use in the SSL connection */
@@ -2301,14 +2298,16 @@ static CURLcode vsetopt(struct Curl_easy *data, CURLoption option,
 
   case CURLOPT_ADDRESS_SCOPE:
     /*
-     * We always get longs when passed plain numericals, but for this value we
-     * know that an unsigned int will always hold the value so we blindly
-     * typecast to this type
+     * Use this scope id when using IPv6
+     * We always get longs when passed plain numericals so we should check
+     * that the value fits into an unsigned 32 bit integer.
      */
-    arg = va_arg(param, long);
-    if((arg < 0) || (arg > 0xf))
+    uarg = va_arg(param, unsigned long);
+#if SIZEOF_LONG > 4
+    if(uarg > UINT_MAX)
       return CURLE_BAD_FUNCTION_ARGUMENT;
-    data->set.scope_id = curlx_sltoui(arg);
+#endif
+    data->set.scope_id = (unsigned int)uarg;
     break;
 
   case CURLOPT_PROTOCOLS:
