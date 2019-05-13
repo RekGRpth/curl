@@ -186,7 +186,7 @@ static const struct Curl_handler * const protocols[] = {
   &Curl_handler_tftp,
 #endif
 
-#if defined(USE_LIBSSH2) || defined(USE_LIBSSH)
+#if defined(USE_SSH)
   &Curl_handler_scp,
 #endif
 
@@ -194,7 +194,7 @@ static const struct Curl_handler * const protocols[] = {
   &Curl_handler_ssh,
 #endif
 
-#if defined(USE_LIBSSH2) || defined(USE_LIBSSH)
+#if defined(USE_SSH)
   &Curl_handler_sftp,
 #endif
 
@@ -383,7 +383,9 @@ CURLcode Curl_close(struct Curl_easy *data)
   Curl_altsvc_cleanup(data->asi);
   data->asi = NULL;
 #endif
-  Curl_digest_cleanup(data);
+#if !defined(CURL_DISABLE_HTTP) && !defined(CURL_DISABLE_CRYPTO_AUTH)
+  Curl_http_auth_cleanup_digest(data);
+#endif
   Curl_safefree(data->info.contenttype);
   Curl_safefree(data->info.wouldredirect);
 
@@ -699,7 +701,7 @@ static void conn_shutdown(struct connectdata *conn)
 
 #if !defined(CURL_DISABLE_HTTP) && defined(USE_NTLM) && \
     defined(NTLM_WB_ENABLED)
-  Curl_ntlm_wb_cleanup(conn);
+  Curl_http_auth_cleanup_ntlm_wb(conn);
 #endif
 
   /* unlink ourselves. this should be called last since other shutdown
@@ -803,11 +805,11 @@ CURLcode Curl_disconnect(struct Curl_easy *data,
 
 #if !defined(CURL_DISABLE_HTTP) && defined(USE_NTLM)
   /* Cleanup NTLM connection-related data */
-  Curl_http_ntlm_cleanup(conn);
+  Curl_http_auth_cleanup_ntlm(conn);
 #endif
 #if !defined(CURL_DISABLE_HTTP) && defined(USE_SPNEGO)
   /* Cleanup NEGOTIATE connection-related data */
-  Curl_cleanup_negotiate(conn);
+  Curl_http_auth_cleanup_negotiate(conn);
 #endif
 
   /* the protocol specific disconnect handler and conn_shutdown need a transfer
@@ -1035,7 +1037,7 @@ ConnectionExists(struct Curl_easy *data,
 
     /* We can't multiplex if we don't know anything about the server */
     if(canmultiplex) {
-      if(bundle->multiuse <= BUNDLE_UNKNOWN) {
+      if(bundle->multiuse == BUNDLE_UNKNOWN) {
         if((bundle->multiuse == BUNDLE_UNKNOWN) && data->set.pipewait) {
           infof(data, "Server doesn't support multiplex yet, wait\n");
           *waitpipe = TRUE;
@@ -1049,6 +1051,10 @@ ConnectionExists(struct Curl_easy *data,
       if((bundle->multiuse == BUNDLE_MULTIPLEX) &&
          !Curl_multiplex_wanted(data->multi)) {
         infof(data, "Could multiplex, but not asked to!\n");
+        canmultiplex = FALSE;
+      }
+      if(bundle->multiuse == BUNDLE_NO_MULTIUSE) {
+        infof(data, "Can not multiplex, even if we wanted to!\n");
         canmultiplex = FALSE;
       }
     }
@@ -1075,7 +1081,8 @@ ConnectionExists(struct Curl_easy *data,
         continue;
       }
 
-      multiplexed = CONN_INUSE(check);
+      multiplexed = CONN_INUSE(check) &&
+        (bundle->multiuse == BUNDLE_MULTIPLEX);
 
       if(canmultiplex) {
         if(check->bits.protoconnstart && check->bits.close)

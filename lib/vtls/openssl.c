@@ -48,6 +48,7 @@
 #include "vtls.h"
 #include "strcase.h"
 #include "hostcheck.h"
+#include "multiif.h"
 #include "curl_printf.h"
 #include <openssl/ssl.h>
 #include <openssl/rand.h>
@@ -2917,6 +2918,9 @@ static CURLcode ossl_connect_step2(struct connectdata *conn, int sockindex)
       }
       else
         infof(data, "ALPN, server did not agree to a protocol\n");
+
+      Curl_multiuse_state(conn, conn->negnpn == CURL_HTTP_VERSION_2 ?
+                          BUNDLE_MULTIPLEX : BUNDLE_NO_MULTIUSE);
     }
 #endif
 
@@ -3822,7 +3826,11 @@ static size_t Curl_ossl_version(char *buffer, size_t size)
       sub[0]='\0';
   }
 
-  return msnprintf(buffer, size, "%s/%lx.%lx.%lx%s",
+  return msnprintf(buffer, size, "%s/%lx.%lx.%lx%s"
+#ifdef OPENSSL_FIPS
+                   "-fips"
+#endif
+                   ,
                    OSSL_PACKAGE,
                    (ssleay_value>>28)&0xf,
                    (ssleay_value>>20)&0xff,

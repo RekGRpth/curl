@@ -474,8 +474,6 @@ CURLMcode curl_multi_add_handle(struct Curl_multi *multi,
     data->set.server_response_timeout;
   data->state.conn_cache->closure_handle->set.no_signal =
     data->set.no_signal;
-  data->state.conn_cache->closure_handle->set.verbose =
-    data->set.verbose;
 
   update_timer(multi);
   return CURLM_OK;
@@ -1364,6 +1362,11 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
                                &data->connect_queue);
         result = CURLE_OK;
         break;
+      }
+      else if(data->state.previouslypending) {
+        /* this transfer comes from the pending queue so try move another */
+        infof(data, "Transfer was pending, now try another\n");
+        process_pending_handles(data->multi);
       }
 
       if(!result) {
@@ -2976,6 +2979,22 @@ size_t Curl_multi_max_total_connections(struct Curl_multi *multi)
   return multi ? multi->max_total_connections : 0;
 }
 
+/*
+ * When information about a connection has appeared, call this!
+ */
+
+void Curl_multiuse_state(struct connectdata *conn,
+                         int bundlestate) /* use BUNDLE_* defines */
+{
+  DEBUGASSERT(conn);
+  DEBUGASSERT(conn->bundle);
+  DEBUGASSERT(conn->data);
+  DEBUGASSERT(conn->data->multi);
+
+  conn->bundle->multiuse = bundlestate;
+  process_pending_handles(conn->data->multi);
+}
+
 static void process_pending_handles(struct Curl_multi *multi)
 {
   struct curl_llist_element *e = multi->pending.head;
@@ -2991,6 +3010,9 @@ static void process_pending_handles(struct Curl_multi *multi)
 
     /* Make sure that the handle will be processed soonish. */
     Curl_expire(data, 0, EXPIRE_RUN_NOW);
+
+    /* mark this as having been in the pending queue */
+    data->state.previouslypending = TRUE;
   }
 }
 
@@ -3034,8 +3056,8 @@ void Curl_multi_dump(struct Curl_multi *multi)
           continue;
         }
         fprintf(stderr, "[%s %s] ",
-                entry->action&CURL_POLL_IN?"RECVING":"",
-                entry->action&CURL_POLL_OUT?"SENDING":"");
+                (entry->action&CURL_POLL_IN)?"RECVING":"",
+                (entry->action&CURL_POLL_OUT)?"SENDING":"");
       }
       if(data->numsocks)
         fprintf(stderr, "\n");

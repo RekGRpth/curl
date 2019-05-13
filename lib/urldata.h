@@ -1363,6 +1363,7 @@ struct UrlState {
                   when multi_done() is called, to prevent multi_done() to get
                   invoked twice when the multi interface is used. */
   bit stream_depends_e:1; /* set or don't set the Exclusive bit */
+  bit previouslypending:1; /* this transfer WAS in the multi->pending queue */
 };
 
 
@@ -1453,7 +1454,7 @@ enum dupstring {
   STRING_RTSP_SESSION_ID, /* Session ID to use */
   STRING_RTSP_STREAM_URI, /* Stream URI for this request */
   STRING_RTSP_TRANSPORT,  /* Transport for this session */
-#if defined(USE_LIBSSH2) || defined(USE_LIBSSH)
+#ifdef USE_SSH
   STRING_SSH_PRIVATE_KEY, /* path to the private key file for auth */
   STRING_SSH_PUBLIC_KEY,  /* path to the public key file for auth */
   STRING_SSH_HOST_PUBLIC_KEY_MD5, /* md5 of host public key in ascii hex */
