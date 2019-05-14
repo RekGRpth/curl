@@ -92,7 +92,9 @@ static int http_getsock_do(struct connectdata *conn,
                            int numsocks);
 static int http_should_fail(struct connectdata *conn);
 
+#ifndef CURL_DISABLE_PROXY
 static CURLcode add_haproxy_protocol_header(struct connectdata *conn);
+#endif
 
 #ifdef USE_SSL
 static CURLcode https_connecting(struct connectdata *conn, bool *done);
@@ -176,7 +178,7 @@ static CURLcode http_setup_conn(struct connectdata *conn)
   return CURLE_OK;
 }
 
-
+#ifndef CURL_DISABLE_PROXY
 /*
  * checkProxyHeaders() checks the linked list of custom proxy headers
  * if proxy headers are not available, then it will lookup into http header
@@ -203,6 +205,10 @@ char *Curl_checkProxyheaders(const struct connectdata *conn,
 
   return NULL;
 }
+#else
+/* disabled */
+#define Curl_checkProxyheaders(x,y) NULL
+#endif
 
 /*
  * Strip off leading and trailing whitespace from the value in the
@@ -257,6 +263,7 @@ char *Curl_copy_header_value(const char *header)
   return value;
 }
 
+#ifndef CURL_DISABLE_HTTP_AUTH
 /*
  * http_output_basic() sets up an Authorization: header (or the proxy version)
  * for HTTP Basic authentication.
@@ -337,6 +344,8 @@ static CURLcode http_output_bearer(struct connectdata *conn)
   fail:
   return result;
 }
+
+#endif
 
 /* pickoneauth() selects the most favourable authentication method from the
  * ones available and the ones we want.
@@ -611,6 +620,7 @@ CURLcode Curl_http_auth_act(struct connectdata *conn)
   return result;
 }
 
+#ifndef CURL_DISABLE_HTTP_AUTH
 /*
  * Output the correct authentication header depending on the auth type
  * and whether or not it is to a proxy.
@@ -798,6 +808,22 @@ Curl_http_output_auth(struct connectdata *conn,
 
   return result;
 }
+
+#else
+/* when disabled */
+CURLcode
+Curl_http_output_auth(struct connectdata *conn,
+                      const char *request,
+                      const char *path,
+                      bool proxytunnel)
+{
+  (void)conn;
+  (void)request;
+  (void)path;
+  (void)proxytunnel;
+  return CURLE_OK;
+}
+#endif
 
 /*
  * Curl_http_input_auth() deals with Proxy-Authenticate: and WWW-Authenticate:
@@ -1455,12 +1481,14 @@ CURLcode Curl_http_connect(struct connectdata *conn, bool *done)
     /* nothing else to do except wait right now - we're not done here. */
     return CURLE_OK;
 
+#ifndef CURL_DISABLE_PROXY
   if(conn->data->set.haproxyprotocol) {
     /* add HAProxy PROXY protocol header */
     result = add_haproxy_protocol_header(conn);
     if(result)
       return result;
   }
+#endif
 
   if(conn->given->protocol & CURLPROTO_HTTPS) {
     /* perform SSL initialization */
@@ -1487,6 +1515,7 @@ static int http_getsock_do(struct connectdata *conn,
   return GETSOCK_WRITESOCK(0);
 }
 
+#ifndef CURL_DISABLE_PROXY
 static CURLcode add_haproxy_protocol_header(struct connectdata *conn)
 {
   char proxy_header[128];
@@ -1527,6 +1556,7 @@ static CURLcode add_haproxy_protocol_header(struct connectdata *conn)
 
   return result;
 }
+#endif
 
 #ifdef USE_SSL
 static CURLcode https_connecting(struct connectdata *conn, bool *done)
@@ -1861,6 +1891,7 @@ CURLcode Curl_add_custom_headers(struct connectdata *conn,
   return CURLE_OK;
 }
 
+#ifndef CURL_DISABLE_PARSEDATE
 CURLcode Curl_add_timecondition(struct Curl_easy *data,
                                 Curl_send_buffer *req_buffer)
 {
@@ -1919,6 +1950,16 @@ CURLcode Curl_add_timecondition(struct Curl_easy *data,
 
   return result;
 }
+#else
+/* disabled */
+CURLcode Curl_add_timecondition(struct Curl_easy *data,
+                                Curl_send_buffer *req_buffer)
+{
+  (void)data;
+  (void)req_buffer;
+  return CURLE_OK;
+}
+#endif
 
 /*
  * Curl_http() gets called from the generic multi_do() function when a HTTP
@@ -2154,6 +2195,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
     http->sendit = NULL;
   }
 
+#ifndef CURL_DISABLE_MIME
   if(http->sendit) {
     const char *cthdr = Curl_checkheaders(conn, "Content-Type");
 
@@ -2178,6 +2220,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
       return result;
     http->postsize = Curl_mime_size(http->sendit);
   }
+#endif
 
   ptr = Curl_checkheaders(conn, "Transfer-Encoding");
   if(ptr) {
@@ -2746,6 +2789,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
         return result;
     }
 
+#ifndef CURL_DISABLE_MIME
     /* Output mime-generated headers. */
     {
       struct curl_slist *hdr;
@@ -2756,6 +2800,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
           return result;
       }
     }
+#endif
 
     /* For really small posts we don't use Expect: headers at all, and for
        the somewhat bigger ones we allow the app to disable it. Just make

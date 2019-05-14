@@ -604,7 +604,9 @@ struct SingleRequest {
   char *upload_fromhere;
   void *protop;       /* Allocated protocol-specific data. Each protocol
                          handler makes sure this points to data it needs. */
+#ifndef CURL_DISABLE_DOH
   struct dohdata doh; /* DoH specific data for this request */
+#endif
   bit header:1;       /* incoming data has HTTP header */
   bit content_range:1; /* set TRUE if Content-Range: was found */
   bit upload_done:1;  /* set to TRUE when doing chunked transfer-encoding
@@ -1279,7 +1281,6 @@ struct UrlState {
 
   struct auth authhost;  /* auth details for host */
   struct auth authproxy; /* auth details for proxy */
-
   void *resolver; /* resolver state, if it is used in the URL state -
                      ares_channel f.e. */
 
@@ -1802,7 +1803,9 @@ struct Curl_easy {
   struct Progress progress;    /* for all the progress meter data */
   struct UrlState state;       /* struct for fields used for state info and
                                   other dynamic purposes */
+#ifndef CURL_DISABLE_FTP
   struct WildcardData wildcard; /* wildcard download state info */
+#endif
   struct PureInfo info;        /* stats, reports and info data */
   struct curl_tlssessioninfo tsi; /* Information about the TLS session, only
                                      valid after a client has asked for it */
