@@ -466,8 +466,8 @@ static CURLcode http_perhapsrewind(struct connectdata *conn)
        (data->state.authproxy.picked == CURLAUTH_NTLM_WB) ||
        (data->state.authhost.picked == CURLAUTH_NTLM_WB)) {
       if(((expectsend - bytessent) < 2000) ||
-         (conn->ntlm.state != NTLMSTATE_NONE) ||
-         (conn->proxyntlm.state != NTLMSTATE_NONE)) {
+         (conn->http_ntlm_state != NTLMSTATE_NONE) ||
+         (conn->proxy_ntlm_state != NTLMSTATE_NONE)) {
         /* The NTLM-negotiation has started *OR* there is just a little (<2K)
            data left to send, keep on sending. */
 
@@ -494,8 +494,8 @@ static CURLcode http_perhapsrewind(struct connectdata *conn)
     if((data->state.authproxy.picked == CURLAUTH_NEGOTIATE) ||
        (data->state.authhost.picked == CURLAUTH_NEGOTIATE)) {
       if(((expectsend - bytessent) < 2000) ||
-         (conn->negotiate.state != GSS_AUTHNONE) ||
-         (conn->proxyneg.state != GSS_AUTHNONE)) {
+         (conn->http_negotiate_state != GSS_AUTHNONE) ||
+         (conn->proxy_negotiate_state != GSS_AUTHNONE)) {
         /* The NEGOTIATE-negotiation has started *OR*
         there is just a little (<2K) data left to send, keep on sending. */
 
@@ -840,8 +840,8 @@ CURLcode Curl_http_input_auth(struct connectdata *conn, bool proxy,
   struct Curl_easy *data = conn->data;
 
 #ifdef USE_SPNEGO
-  struct negotiatedata *negdata = proxy?
-    &conn->proxyneg:&conn->negotiate;
+  curlnegotiate *negstate = proxy ? &conn->proxy_negotiate_state :
+                                    &conn->http_negotiate_state;
 #endif
   unsigned long *availp;
   struct auth *authp;
@@ -888,7 +888,7 @@ CURLcode Curl_http_input_auth(struct connectdata *conn, bool proxy,
               return CURLE_OUT_OF_MEMORY;
             data->state.authproblem = FALSE;
             /* we received a GSS auth token and we dealt with it fine */
-            negdata->state = GSS_AUTHRECV;
+            *negstate = GSS_AUTHRECV;
           }
           else
             data->state.authproblem = TRUE;
@@ -919,19 +919,10 @@ CURLcode Curl_http_input_auth(struct connectdata *conn, bool proxy,
                 *availp |= CURLAUTH_NTLM_WB;
                 authp->avail |= CURLAUTH_NTLM_WB;
 
-                /* Get the challenge-message which will be passed to
-                 * ntlm_auth for generating the type 3 message later */
-                while(*auth && ISSPACE(*auth))
-                  auth++;
-                if(checkprefix("NTLM", auth)) {
-                  auth += strlen("NTLM");
-                  while(*auth && ISSPACE(*auth))
-                    auth++;
-                  if(*auth) {
-                    conn->challenge_header = strdup(auth);
-                    if(!conn->challenge_header)
-                      return CURLE_OUT_OF_MEMORY;
-                  }
+                result = Curl_input_ntlm_wb(conn, proxy, auth);
+                if(result) {
+                  infof(data, "Authentication problem. Ignoring this.\n");
+                  data->state.authproblem = TRUE;
                 }
               }
 #endif
@@ -1716,8 +1707,6 @@ CURLcode Curl_http_compile_trailers(struct curl_slist *trailers,
   CURLcode result = CURLE_OK;
   const char *endofline_native = NULL;
   const char *endofline_network = NULL;
-
-  /* TODO: Maybe split Curl_add_custom_headers to make it reusable here */
 
   if(
 #ifdef CURL_DO_LINEEND_CONV
@@ -3422,9 +3411,9 @@ CURLcode Curl_http_readwrite_headers(struct Curl_easy *data,
 #if defined(USE_NTLM)
       if(conn->bits.close &&
          (((data->req.httpcode == 401) &&
-           (conn->ntlm.state == NTLMSTATE_TYPE2)) ||
+           (conn->http_ntlm_state == NTLMSTATE_TYPE2)) ||
           ((data->req.httpcode == 407) &&
-           (conn->proxyntlm.state == NTLMSTATE_TYPE2)))) {
+           (conn->proxy_ntlm_state == NTLMSTATE_TYPE2)))) {
         infof(data, "Connection closure while negotiating auth (HTTP 1.0?)\n");
         data->state.authproblem = TRUE;
       }
@@ -3432,19 +3421,19 @@ CURLcode Curl_http_readwrite_headers(struct Curl_easy *data,
 #if defined(USE_SPNEGO)
       if(conn->bits.close &&
         (((data->req.httpcode == 401) &&
-          (conn->negotiate.state == GSS_AUTHRECV)) ||
+          (conn->http_negotiate_state == GSS_AUTHRECV)) ||
          ((data->req.httpcode == 407) &&
-          (conn->proxyneg.state == GSS_AUTHRECV)))) {
+          (conn->proxy_negotiate_state == GSS_AUTHRECV)))) {
         infof(data, "Connection closure while negotiating auth (HTTP 1.0?)\n");
         data->state.authproblem = TRUE;
       }
-      if((conn->negotiate.state == GSS_AUTHDONE) &&
+      if((conn->http_negotiate_state == GSS_AUTHDONE) &&
          (data->req.httpcode != 401)) {
-        conn->negotiate.state = GSS_AUTHSUCC;
+        conn->http_negotiate_state = GSS_AUTHSUCC;
       }
-      if((conn->proxyneg.state == GSS_AUTHDONE) &&
+      if((conn->proxy_negotiate_state == GSS_AUTHDONE) &&
          (data->req.httpcode != 407)) {
-        conn->proxyneg.state = GSS_AUTHSUCC;
+        conn->proxy_negotiate_state = GSS_AUTHSUCC;
       }
 #endif
       /*
@@ -3723,7 +3712,6 @@ CURLcode Curl_http_readwrite_headers(struct Curl_easy *data,
           conn->httpversion = 11; /* For us, RTSP acts like HTTP 1.1 */
         }
         else {
-          /* TODO: do we care about the other cases here? */
           nc = 0;
         }
       }

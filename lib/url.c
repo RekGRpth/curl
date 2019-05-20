@@ -109,7 +109,6 @@ bool curl_win32_idn_to_ascii(const char *in, char **out);
 #include "connect.h"
 #include "inet_ntop.h"
 #include "http_ntlm.h"
-#include "curl_ntlm_wb.h"
 #include "socks.h"
 #include "curl_rtmp.h"
 #include "gopher.h"
@@ -444,11 +443,12 @@ CURLcode Curl_init_userdefined(struct Curl_easy *data)
 
   set->httpreq = HTTPREQ_GET; /* Default HTTP request */
   set->rtspreq = RTSPREQ_OPTIONS; /* Default RTSP request */
+#ifndef CURL_DISABLE_FILE
   set->ftp_use_epsv = TRUE;   /* FTP defaults to EPSV operations */
   set->ftp_use_eprt = TRUE;   /* FTP defaults to EPRT operations */
   set->ftp_use_pret = FALSE;  /* mainly useful for drftpd servers */
   set->ftp_filemethod = FTPFILE_MULTICWD;
-
+#endif
   set->dns_cache_timeout = 60; /* Timeout every 60 seconds by default */
 
   /* Set the default size of the SSL session ID cache */
@@ -698,11 +698,6 @@ static void conn_shutdown(struct connectdata *conn)
     Curl_closesocket(conn, conn->tempsock[0]);
   if(CURL_SOCKET_BAD != conn->tempsock[1])
     Curl_closesocket(conn, conn->tempsock[1]);
-
-#if !defined(CURL_DISABLE_HTTP) && defined(USE_NTLM) && \
-    defined(NTLM_WB_ENABLED)
-  Curl_http_auth_cleanup_ntlm_wb(conn);
-#endif
 
   /* unlink ourselves. this should be called last since other shutdown
      procedures need a valid conn->data and this may clear it. */
@@ -1288,7 +1283,7 @@ ConnectionExists(struct Curl_easy *data,
              strcmp(needle->passwd, check->passwd))
             continue;
         }
-        else if(check->ntlm.state != NTLMSTATE_NONE) {
+        else if(check->http_ntlm_state != NTLMSTATE_NONE) {
           /* Connection is using NTLM auth but we don't want NTLM */
           continue;
         }
@@ -1304,7 +1299,7 @@ ConnectionExists(struct Curl_easy *data,
              strcmp(needle->http_proxy.passwd, check->http_proxy.passwd))
             continue;
         }
-        else if(check->proxyntlm.state != NTLMSTATE_NONE) {
+        else if(check->proxy_ntlm_state != NTLMSTATE_NONE) {
           /* Proxy connection is using NTLM auth but we don't want NTLM */
           continue;
         }
@@ -1314,9 +1309,9 @@ ConnectionExists(struct Curl_easy *data,
           chosen = check;
 
           if((wantNTLMhttp &&
-             (check->ntlm.state != NTLMSTATE_NONE)) ||
+             (check->http_ntlm_state != NTLMSTATE_NONE)) ||
               (wantProxyNTLMhttp &&
-               (check->proxyntlm.state != NTLMSTATE_NONE))) {
+               (check->proxy_ntlm_state != NTLMSTATE_NONE))) {
             /* We must use this connection, no other */
             *force_reuse = TRUE;
             break;
@@ -1777,9 +1772,10 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
 #endif /* CURL_DISABLE_PROXY */
 
   conn->bits.user_passwd = (data->set.str[STRING_USERNAME]) ? TRUE : FALSE;
+#ifndef CURL_DISABLE_FTP
   conn->bits.ftp_use_epsv = data->set.ftp_use_epsv;
   conn->bits.ftp_use_eprt = data->set.ftp_use_eprt;
-
+#endif
   conn->ssl_config.verifystatus = data->set.ssl.primary.verifystatus;
   conn->ssl_config.verifypeer = data->set.ssl.primary.verifypeer;
   conn->ssl_config.verifyhost = data->set.ssl.primary.verifyhost;
@@ -2327,46 +2323,55 @@ static CURLcode parse_proxy(struct Curl_easy *data,
                             struct connectdata *conn, char *proxy,
                             curl_proxytype proxytype)
 {
-  char *prox_portno;
-  char *endofprot;
-
-  /* We use 'proxyptr' to point to the proxy name from now on... */
-  char *proxyptr;
   char *portptr;
-  char *atsign;
   long port = -1;
   char *proxyuser = NULL;
   char *proxypasswd = NULL;
+  char *host;
   bool sockstype;
+  CURLUcode uc;
+  struct proxy_info *proxyinfo;
+  CURLU *uhp = curl_url();
+  CURLcode result = CURLE_OK;
+  char *scheme = NULL;
 
-  /* We do the proxy host string parsing here. We want the host name and the
-   * port name. Accept a protocol:// prefix
-   */
+  /* When parsing the proxy, allowing non-supported schemes since we have
+     these made up ones for proxies. Guess scheme for URLs without it. */
+  uc = curl_url_set(uhp, CURLUPART_URL, proxy,
+                    CURLU_NON_SUPPORT_SCHEME|CURLU_GUESS_SCHEME);
+  if(!uc) {
+    /* parsed okay as a URL */
+    uc = curl_url_get(uhp, CURLUPART_SCHEME, &scheme, 0);
+    if(uc) {
+      result = CURLE_OUT_OF_MEMORY;
+      goto error;
+    }
 
-  /* Parse the protocol part if present */
-  endofprot = strstr(proxy, "://");
-  if(endofprot) {
-    proxyptr = endofprot + 3;
-    if(checkprefix("https", proxy))
+    if(strcasecompare("https", scheme))
       proxytype = CURLPROXY_HTTPS;
-    else if(checkprefix("socks5h", proxy))
+    else if(strcasecompare("socks5h", scheme))
       proxytype = CURLPROXY_SOCKS5_HOSTNAME;
-    else if(checkprefix("socks5", proxy))
+    else if(strcasecompare("socks5", scheme))
       proxytype = CURLPROXY_SOCKS5;
-    else if(checkprefix("socks4a", proxy))
+    else if(strcasecompare("socks4a", scheme))
       proxytype = CURLPROXY_SOCKS4A;
-    else if(checkprefix("socks4", proxy) || checkprefix("socks", proxy))
+    else if(strcasecompare("socks4", scheme) ||
+            strcasecompare("socks", scheme))
       proxytype = CURLPROXY_SOCKS4;
-    else if(checkprefix("http:", proxy))
+    else if(strcasecompare("http", scheme))
       ; /* leave it as HTTP or HTTP/1.0 */
     else {
       /* Any other xxx:// reject! */
       failf(data, "Unsupported proxy scheme for \'%s\'", proxy);
-      return CURLE_COULDNT_CONNECT;
+      result = CURLE_COULDNT_CONNECT;
+      goto error;
     }
   }
-  else
-    proxyptr = proxy; /* No xxx:// head: It's a HTTP proxy */
+  else {
+    failf(data, "Unsupported proxy syntax in \'%s\'", proxy);
+    result = CURLE_COULDNT_RESOLVE_PROXY;
+    goto error;
+  }
 
 #ifdef USE_SSL
   if(!(Curl_ssl->supports & SSLSUPP_HTTPS_PROXY))
@@ -2374,93 +2379,44 @@ static CURLcode parse_proxy(struct Curl_easy *data,
     if(proxytype == CURLPROXY_HTTPS) {
       failf(data, "Unsupported proxy \'%s\', libcurl is built without the "
                   "HTTPS-proxy support.", proxy);
-      return CURLE_NOT_BUILT_IN;
+      result = CURLE_NOT_BUILT_IN;
+      goto error;
     }
 
-  sockstype = proxytype == CURLPROXY_SOCKS5_HOSTNAME ||
-              proxytype == CURLPROXY_SOCKS5 ||
-              proxytype == CURLPROXY_SOCKS4A ||
-              proxytype == CURLPROXY_SOCKS4;
+  sockstype =
+    proxytype == CURLPROXY_SOCKS5_HOSTNAME ||
+    proxytype == CURLPROXY_SOCKS5 ||
+    proxytype == CURLPROXY_SOCKS4A ||
+    proxytype == CURLPROXY_SOCKS4;
+
+  proxyinfo = sockstype ? &conn->socks_proxy : &conn->http_proxy;
+  proxyinfo->proxytype = proxytype;
 
   /* Is there a username and password given in this proxy url? */
-  atsign = strchr(proxyptr, '@');
-  if(atsign) {
-    CURLcode result =
-      Curl_parse_login_details(proxyptr, atsign - proxyptr,
-                               &proxyuser, &proxypasswd, NULL);
-    if(result)
-      return result;
-    proxyptr = atsign + 1;
+  curl_url_get(uhp, CURLUPART_USER, &proxyuser, CURLU_URLDECODE);
+  curl_url_get(uhp, CURLUPART_PASSWORD, &proxypasswd, CURLU_URLDECODE);
+  if(proxyuser || proxypasswd) {
+    Curl_safefree(proxyinfo->user);
+    proxyinfo->user = proxyuser;
+    Curl_safefree(proxyinfo->passwd);
+    if(!proxypasswd) {
+      proxypasswd = strdup("");
+      if(!proxypasswd) {
+        result = CURLE_OUT_OF_MEMORY;
+        goto error;
+      }
+    }
+    proxyinfo->passwd = proxypasswd;
+    conn->bits.proxy_user_passwd = TRUE; /* enable it */
   }
 
-  /* start scanning for port number at this point */
-  portptr = proxyptr;
+  curl_url_get(uhp, CURLUPART_PORT, &portptr, 0);
 
-  /* detect and extract RFC6874-style IPv6-addresses */
-  if(*proxyptr == '[') {
-    char *ptr = ++proxyptr; /* advance beyond the initial bracket */
-    while(*ptr && (ISXDIGIT(*ptr) || (*ptr == ':') || (*ptr == '.')))
-      ptr++;
-    if(*ptr == '%') {
-      /* There might be a zone identifier */
-      if(strncmp("%25", ptr, 3))
-        infof(data, "Please URL encode %% as %%25, see RFC 6874.\n");
-      ptr++;
-      /* Allow unreserved characters as defined in RFC 3986 */
-      while(*ptr && (ISALPHA(*ptr) || ISXDIGIT(*ptr) || (*ptr == '-') ||
-                     (*ptr == '.') || (*ptr == '_') || (*ptr == '~')))
-        ptr++;
-    }
-    if(*ptr == ']')
-      /* yeps, it ended nicely with a bracket as well */
-      *ptr++ = 0;
-    else
-      infof(data, "Invalid IPv6 address format\n");
-    portptr = ptr;
-    /* Note that if this didn't end with a bracket, we still advanced the
-     * proxyptr first, but I can't see anything wrong with that as no host
-     * name nor a numeric can legally start with a bracket.
-     */
-  }
-
-  /* Get port number off proxy.server.com:1080 */
-  prox_portno = strchr(portptr, ':');
-  if(prox_portno) {
-    char *endp = NULL;
-
-    *prox_portno = 0x0; /* cut off number from host name */
-    prox_portno ++;
-    /* now set the local port number */
-    port = strtol(prox_portno, &endp, 10);
-    if((endp && *endp && (*endp != '/') && (*endp != ' ')) ||
-       (port < 0) || (port > 65535)) {
-      /* meant to detect for example invalid IPv6 numerical addresses without
-         brackets: "2a00:fac0:a000::7:13". Accept a trailing slash only
-         because we then allow "URL style" with the number followed by a
-         slash, used in curl test cases already. Space is also an acceptable
-         terminating symbol. */
-      infof(data, "No valid port number in proxy string (%s)\n",
-            prox_portno);
-    }
-    else
-      conn->port = port;
+  if(portptr) {
+    port = strtol(portptr, NULL, 10);
+    free(portptr);
   }
   else {
-    if(proxyptr[0]=='/') {
-      /* If the first character in the proxy string is a slash, fail
-         immediately. The following code will otherwise clear the string which
-         will lead to code running as if no proxy was set! */
-      Curl_safefree(proxyuser);
-      Curl_safefree(proxypasswd);
-      return CURLE_COULDNT_RESOLVE_PROXY;
-    }
-
-    /* without a port number after the host name, some people seem to use
-       a slash so we strip everything from the first slash */
-    atsign = strchr(proxyptr, '/');
-    if(atsign)
-      *atsign = '\0'; /* cut off path part from host name */
-
     if(data->set.proxyport)
       /* None given in the proxy string, then get the default one if it is
          given */
@@ -2472,57 +2428,32 @@ static CURLcode parse_proxy(struct Curl_easy *data,
         port = CURL_DEFAULT_PROXY_PORT;
     }
   }
-
-  if(*proxyptr) {
-    struct proxy_info *proxyinfo =
-      sockstype ? &conn->socks_proxy : &conn->http_proxy;
-    proxyinfo->proxytype = proxytype;
-
-    if(proxyuser) {
-      /* found user and password, rip them out.  note that we are unescaping
-         them, as there is otherwise no way to have a username or password
-         with reserved characters like ':' in them. */
-      Curl_safefree(proxyinfo->user);
-      proxyinfo->user = curl_easy_unescape(data, proxyuser, 0, NULL);
-      Curl_safefree(proxyuser);
-
-      if(!proxyinfo->user) {
-        Curl_safefree(proxypasswd);
-        return CURLE_OUT_OF_MEMORY;
-      }
-
-      Curl_safefree(proxyinfo->passwd);
-      if(proxypasswd && strlen(proxypasswd) < MAX_CURL_PASSWORD_LENGTH)
-        proxyinfo->passwd = curl_easy_unescape(data, proxypasswd, 0, NULL);
-      else
-        proxyinfo->passwd = strdup("");
-      Curl_safefree(proxypasswd);
-
-      if(!proxyinfo->passwd)
-        return CURLE_OUT_OF_MEMORY;
-
-      conn->bits.proxy_user_passwd = TRUE; /* enable it */
-    }
-
-    if(port >= 0) {
-      proxyinfo->port = port;
-      if(conn->port < 0 || sockstype || !conn->socks_proxy.host.rawalloc)
-        conn->port = port;
-    }
-
-    /* now, clone the cleaned proxy host name */
-    Curl_safefree(proxyinfo->host.rawalloc);
-    proxyinfo->host.rawalloc = strdup(proxyptr);
-    proxyinfo->host.name = proxyinfo->host.rawalloc;
-
-    if(!proxyinfo->host.rawalloc)
-      return CURLE_OUT_OF_MEMORY;
+  if(port >= 0) {
+    proxyinfo->port = port;
+    if(conn->port < 0 || sockstype || !conn->socks_proxy.host.rawalloc)
+      conn->port = port;
   }
 
-  Curl_safefree(proxyuser);
-  Curl_safefree(proxypasswd);
+  /* now, clone the proxy host name */
+  uc = curl_url_get(uhp, CURLUPART_HOST, &host, CURLU_URLDECODE);
+  if(uc) {
+    result = CURLE_OUT_OF_MEMORY;
+    goto error;
+  }
+  Curl_safefree(proxyinfo->host.rawalloc);
+  proxyinfo->host.rawalloc = host;
+  if(host[0] == '[') {
+    /* this is a numerical IPv6, strip off the brackets */
+    size_t len = strlen(host);
+    host[len-1] = 0; /* clear the trailing bracket */
+    host++;
+  }
+  proxyinfo->host.name = host;
 
-  return CURLE_OK;
+  error:
+  free(scheme);
+  curl_url_cleanup(uhp);
+  return result;
 }
 
 /*

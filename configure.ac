@@ -1889,6 +1889,14 @@ if test -z "$ssl_backends" -o "x$OPT_SSL" != xno &&
   test -z "$ssl_msg" || ssl_backends="${ssl_backends:+$ssl_backends, }$ssl_msg"
 fi
 
+if test X"$OPT_SSL" != Xoff &&
+  test X"$OPT_SSL" != Xno &&
+  test "$OPENSSL_ENABLED" != "1"; then
+  AC_MSG_NOTICE([OPT_SSL: $OPT_SSL])
+  AC_MSG_NOTICE([OPENSSL_ENABLED: $OPENSSL_ENABLED])
+  AC_MSG_ERROR([--with-ssl was given but OpenSSL could not be detected])
+fi
+
 dnl **********************************************************************
 dnl Check for the random seed preferences
 dnl **********************************************************************
@@ -3764,6 +3772,8 @@ AC_CHECK_FUNCS([fnmatch \
   getpwuid_r \
   getrlimit \
   gettimeofday \
+  getpeername \
+  getsockname \
   if_nametoindex \
   mach_absolute_time \
   pipe \
