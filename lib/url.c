@@ -1677,13 +1677,6 @@ static void free_idnconverted_hostname(struct hostname *host)
 #endif
 }
 
-static void llist_dtor(void *user, void *element)
-{
-  (void)user;
-  (void)element;
-  /* Do nothing */
-}
-
 /*
  * Allocate and initialize a new connectdata object.
  */
@@ -1795,7 +1788,7 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
 #endif
 
   /* Initialize the easy handle list */
-  Curl_llist_init(&conn->easyq, (curl_llist_dtor) llist_dtor);
+  Curl_llist_init(&conn->easyq, NULL);
 
 #ifdef HAVE_GSSAPI
   conn->data_prot = PROT_CLEAR;
