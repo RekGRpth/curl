@@ -938,8 +938,8 @@ static CURLcode readwrite_data(struct Curl_easy *data,
   return CURLE_OK;
 }
 
-static CURLcode done_sending(struct connectdata *conn,
-                             struct SingleRequest *k)
+CURLcode Curl_done_sending(struct connectdata *conn,
+                           struct SingleRequest *k)
 {
   k->keepon &= ~KEEP_SEND; /* we're done writing */
 
@@ -1047,7 +1047,7 @@ static CURLcode readwrite_upload(struct Curl_easy *data,
         break;
       }
       if(nread <= 0) {
-        result = done_sending(conn, k);
+        result = Curl_done_sending(conn, k);
         if(result)
           return result;
         break;
@@ -1165,7 +1165,7 @@ static CURLcode readwrite_upload(struct Curl_easy *data,
       k->upload_present = 0; /* no more bytes left */
 
       if(k->upload_done) {
-        result = done_sending(conn, k);
+        result = Curl_done_sending(conn, k);
         if(result)
           return result;
       }
