@@ -976,7 +976,8 @@ static int call_extract_if_dead(struct connectdata *conn, void *param)
 static void prune_dead_connections(struct Curl_easy *data)
 {
   struct curltime now = Curl_now();
-  time_t elapsed = Curl_timediff(now, data->state.conn_cache->last_cleanup);
+  timediff_t elapsed =
+    Curl_timediff(now, data->state.conn_cache->last_cleanup);
 
   if(elapsed >= 1000L) {
     struct prunedead prune;
@@ -1444,11 +1445,10 @@ void Curl_verboseconnect(struct connectdata *conn)
 #endif
 
 int Curl_protocol_getsock(struct connectdata *conn,
-                          curl_socket_t *socks,
-                          int numsocks)
+                          curl_socket_t *socks)
 {
   if(conn->handler->proto_getsock)
-    return conn->handler->proto_getsock(conn, socks, numsocks);
+    return conn->handler->proto_getsock(conn, socks);
   /* Backup getsock logic. Since there is a live socket in use, we must wait
      for it or it will be removed from watching when the multi_socket API is
      used. */
@@ -1457,11 +1457,10 @@ int Curl_protocol_getsock(struct connectdata *conn,
 }
 
 int Curl_doing_getsock(struct connectdata *conn,
-                       curl_socket_t *socks,
-                       int numsocks)
+                       curl_socket_t *socks)
 {
   if(conn && conn->handler->doing_getsock)
-    return conn->handler->doing_getsock(conn, socks, numsocks);
+    return conn->handler->doing_getsock(conn, socks);
   return GETSOCK_BLANK;
 }
 
@@ -1778,6 +1777,7 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
   conn->proxy_ssl_config.verifyhost = data->set.proxy_ssl.primary.verifyhost;
   conn->ip_version = data->set.ipver;
   conn->bits.connect_only = data->set.connect_only;
+  conn->transport = TRNSPRT_TCP; /* most of them are TCP streams */
 
 #if !defined(CURL_DISABLE_HTTP) && defined(USE_NTLM) && \
     defined(NTLM_WB_ENABLED)
@@ -2114,7 +2114,6 @@ static CURLcode setup_connection_internals(struct connectdata *conn)
 {
   const struct Curl_handler * p;
   CURLcode result;
-  conn->transport = TRNSPRT_TCP; /* most of them are TCP streams */
 
   /* Perform setup complement if some. */
   p = conn->handler;
@@ -3165,11 +3164,23 @@ static CURLcode parse_connect_to_slist(struct Curl_easy *data,
     const char *nhost;
     int nport;
     enum alpnid nalpnid;
+    enum alpnid salpnid;
     bool hit;
     host = conn->host.rawalloc;
+#ifdef USE_NGHTTP2
+    /* with h2 support, check that first */
+    salpnid = ALPN_h2;
     hit = Curl_altsvc_lookup(data->asi,
-                             ALPN_h1, host, conn->remote_port, /* from */
+                             salpnid, host, conn->remote_port, /* from */
                              &nalpnid, &nhost, &nport /* to */);
+    if(!hit)
+#endif
+    {
+      salpnid = ALPN_h1;
+      hit = Curl_altsvc_lookup(data->asi,
+                               salpnid, host, conn->remote_port, /* from */
+                               &nalpnid, &nhost, &nport /* to */);
+    }
     if(hit) {
       char *hostd = strdup((char *)nhost);
       if(!hostd)
@@ -3180,8 +3191,25 @@ static CURLcode parse_connect_to_slist(struct Curl_easy *data,
       conn->conn_to_port = nport;
       conn->bits.conn_to_port = TRUE;
       infof(data, "Alt-svc connecting from [%s]%s:%d to [%s]%s:%d\n",
-            Curl_alpnid2str(ALPN_h1), host, conn->remote_port,
+            Curl_alpnid2str(salpnid), host, conn->remote_port,
             Curl_alpnid2str(nalpnid), hostd, nport);
+      if(salpnid != nalpnid) {
+        /* protocol version switch */
+        switch(nalpnid) {
+        case ALPN_h1:
+          conn->httpversion = CURL_HTTP_VERSION_1_1;
+          break;
+        case ALPN_h2:
+          conn->httpversion = CURL_HTTP_VERSION_2TLS;
+          break;
+        case ALPN_h3:
+          conn->transport = TRNSPRT_QUIC;
+          conn->httpversion = CURL_HTTP_VERSION_LAST; /* for the moment */
+          break;
+        default: /* shouldn't be possible */
+          break;
+        }
+      }
     }
   }
 #endif

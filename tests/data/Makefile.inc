@@ -140,7 +140,7 @@ test1236 test1237 test1238 test1239 test1240 test1241 test1242 test1243 \
 test1244 test1245 test1246 test1247 test1248 test1249 test1250 test1251 \
 test1252 test1253 test1254 test1255 test1256 test1257 test1258 test1259 \
 test1260 test1261 test1262 test1263 test1264 test1265 test1266 test1267 \
-test1268 \
+test1268 test1269 \
 \
 test1280 test1281 test1282 test1283 test1284 test1285 test1286 test1287 \
 test1288 test1289 test1290 test1291 test1292 \
@@ -199,7 +199,8 @@ test2040 test2041 test2042 test2043 test2044 test2045 test2046 test2047 \
 test2048 test2049 test2050 test2051 test2052 test2053 test2054 test2055 \
 test2056 test2057 test2058 test2059 test2060 test2061 test2062 test2063 \
 test2064 test2065 test2066 test2067 test2068 test2069 \
-         test2071 test2072 test2073 test2074 test2075 test2076 \
+         test2071 test2072 test2073 test2074 test2075 test2076 test2077 \
+test2078 \
 test2080 \
 test2100 \
 \

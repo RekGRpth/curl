@@ -1972,14 +1972,17 @@ static CURLcode parallel_transfers(struct GlobalConfig *global,
 
   while(!done && !mcode && still_running) {
     int numfds;
+    struct timeval before = tvnow();
+    long delta;
 
     mcode = curl_multi_wait(multi, NULL, 0, 1000, &numfds);
+    delta = tvdiff(tvnow(), before);
 
     if(!mcode) {
-      if(!numfds) {
+      if(!numfds && (delta < 30)) {
         long sleep_ms;
 
-        /* If it returns without any filedescriptor instantly, we need to
+        /* If it returns without any file descriptor instantly, we need to
            avoid busy-looping during periods where it has nothing particular
            to wait for */
         curl_multi_timeout(multi, &sleep_ms);
@@ -2090,12 +2093,6 @@ static CURLcode operate_do(struct GlobalConfig *global,
 {
   CURLcode result = CURLE_OK;
   bool capath_from_env;
-
-  /*
-  ** Beyond this point no return'ing from this function allowed.
-  ** Jump to label 'quit_curl' in order to abandon this function
-  ** from outside of nested loops further down below.
-  */
 
   /* Check we have a url */
   if(!config->url_list || !config->url_list->url) {

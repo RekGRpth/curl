@@ -70,7 +70,11 @@ CURLcode Curl_quic_connect(struct connectdata *conn, curl_socket_t sockfd,
   quiche_config_set_initial_max_stream_data_uni(qs->cfg, QUIC_MAX_DATA);
   quiche_config_set_initial_max_streams_bidi(qs->cfg, QUIC_MAX_STREAMS);
   quiche_config_set_initial_max_streams_uni(qs->cfg, QUIC_MAX_STREAMS);
-  quiche_config_set_application_protos(qs->cfg, (uint8_t *) "\x05hq-20", 6);
+  quiche_config_set_application_protos(qs->cfg,
+                                       (uint8_t *)
+                                       QUICHE_H3_APPLICATION_PROTOCOL,
+                                       sizeof(QUICHE_H3_APPLICATION_PROTOCOL)
+                                       - 1);
 
   result = Curl_rand(conn->data, qs->scid, sizeof(qs->scid));
   if(result)
@@ -125,15 +129,19 @@ static CURLcode process_ingress(struct connectdata *conn, int sockfd)
     if((recvd < 0) && ((errno == EAGAIN) || (errno == EWOULDBLOCK)))
       break;
 
-    if(recvd < 0)
+    if(recvd < 0) {
+      failf(conn->data, "quiche: recv() unexpectedly returned %d", recvd);
       return CURLE_RECV_ERROR;
+    }
 
     recvd = quiche_conn_recv(qs->conn, buf, recvd);
     if(recvd == QUICHE_ERR_DONE)
       break;
 
-    if(recvd < 0)
+    if(recvd < 0) {
+      failf(conn->data, "quiche_conn_recv() == %d", recvd);
       return CURLE_RECV_ERROR;
+    }
   } while(1);
 
   return CURLE_OK;
