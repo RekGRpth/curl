@@ -453,10 +453,9 @@ static CURLcode post_transfer(struct GlobalConfig *global,
       /* If it returned OK. _or_ failonerror was enabled and it
          returned due to such an error, check for HTTP transient
          errors to retry on. */
-      char *effective_url = NULL;
-      curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective_url);
-      if(effective_url &&
-         checkprefix("http", effective_url)) {
+      long protocol;
+      curl_easy_getinfo(curl, CURLINFO_PROTOCOL, &protocol);
+      if((protocol == CURLPROTO_HTTP) || (protocol == CURLPROTO_HTTPS)) {
         /* This was HTTP(S) */
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response);
 
@@ -497,6 +496,8 @@ static CURLcode post_transfer(struct GlobalConfig *global,
     }
 
     if(retry) {
+      long sleeptime = 0;
+      curl_off_t retry_after = 0;
       static const char * const m[]={
         NULL,
         "timeout",
@@ -505,13 +506,24 @@ static CURLcode post_transfer(struct GlobalConfig *global,
         "FTP error"
       };
 
+      sleeptime = per->retry_sleep;
+      if(RETRY_HTTP == retry) {
+        curl_easy_getinfo(curl, CURLINFO_RETRY_AFTER, &retry_after);
+        if(retry_after) {
+          /* store in a 'long', make sure it doesn't overflow */
+          if(retry_after > LONG_MAX/1000)
+            sleeptime = LONG_MAX;
+          else
+            sleeptime = (long)retry_after * 1000; /* milliseconds */
+        }
+      }
       warnf(config->global, "Transient problem: %s "
             "Will retry in %ld seconds. "
             "%ld retries left.\n",
             m[retry], per->retry_sleep/1000L, per->retry_numretries);
 
-      tool_go_sleep(per->retry_sleep);
       per->retry_numretries--;
+      tool_go_sleep(sleeptime);
       if(!config->retry_delay) {
         per->retry_sleep *= 2;
         if(per->retry_sleep > RETRY_SLEEP_MAX)
@@ -1778,6 +1790,10 @@ static CURLcode create_transfers(struct GlobalConfig *global,
         if(config->mail_auth)
           my_setopt_str(curl, CURLOPT_MAIL_AUTH, config->mail_auth);
 
+        /* new in 7.66.0 */
+        if(config->sasl_authzid)
+          my_setopt_str(curl, CURLOPT_SASL_AUTHZID, config->sasl_authzid);
+
         /* new in 7.31.0 */
         if(config->sasl_ir)
           my_setopt(curl, CURLOPT_SASL_IR, 1L);
@@ -1801,6 +1817,7 @@ static CURLcode create_transfers(struct GlobalConfig *global,
                           config->unix_socket_path);
           }
         }
+
         /* new in 7.45.0 */
         if(config->proto_default)
           my_setopt_str(curl, CURLOPT_DEFAULT_PROTOCOL, config->proto_default);
@@ -1904,23 +1921,6 @@ static CURLcode create_transfers(struct GlobalConfig *global,
   return result;
 }
 
-/* portable millisecond sleep */
-static void wait_ms(int ms)
-{
-#if defined(MSDOS)
-  delay(ms);
-#elif defined(WIN32)
-  Sleep(ms);
-#elif defined(HAVE_USLEEP)
-  usleep(1000 * ms);
-#else
-  struct timeval pending_tv;
-  pending_tv.tv_sec = ms / 1000;
-  pending_tv.tv_usec = (ms % 1000) * 1000;
-  (void)select(0, NULL, NULL, NULL, &pending_tv);
-#endif
-}
-
 static long all_added; /* number of easy handles currently added */
 
 static int add_parallel_transfers(struct GlobalConfig *global,
@@ -1971,30 +1971,9 @@ static CURLcode parallel_transfers(struct GlobalConfig *global,
     return result;
 
   while(!done && !mcode && still_running) {
-    int numfds;
-    struct timeval before = tvnow();
-    long delta;
-
-    mcode = curl_multi_wait(multi, NULL, 0, 1000, &numfds);
-    delta = tvdiff(tvnow(), before);
-
-    if(!mcode) {
-      if(!numfds && (delta < 30)) {
-        long sleep_ms;
-
-        /* If it returns without any file descriptor instantly, we need to
-           avoid busy-looping during periods where it has nothing particular
-           to wait for */
-        curl_multi_timeout(multi, &sleep_ms);
-        if(sleep_ms) {
-          if(sleep_ms > 1000)
-            sleep_ms = 1000;
-          wait_ms((int)sleep_ms);
-        }
-      }
-
+    mcode = curl_multi_poll(multi, NULL, 0, 1000, NULL);
+    if(!mcode)
       mcode = curl_multi_perform(multi, &still_running);
-    }
 
     progress_meter(global, &start, FALSE);
 

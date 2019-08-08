@@ -20,39 +20,44 @@
 .\" *
 .\" **************************************************************************
 .\"
-.TH CURLOPT_HTTP09_ALLOWED 3 "17 Dec 2018" "libcurl 7.64.0" "curl_easy_setopt options"
+.TH CURLINFO_RETRY_AFTER 3 "6 Aug 2019" "libcurl 7.66.0" "curl_easy_getinfo options"
 .SH NAME
-CURLOPT_HTTP09 \- allow HTTP/0.9 response
+CURLINFO_RETRY_AFTER \- returns the Retry-After retry delay
 .SH SYNOPSIS
 #include <curl/curl.h>
 
-CURLcode curl_easy_setopt(CURL *handle, CURLOPT_HTTP09_ALLOWED, long allowed);
+CURLcode curl_easy_getinfo(CURL *handle, CURLINFO_RETRY_AFTER, curl_off_t *retry);
 .SH DESCRIPTION
-Pass the long argument \fIallowed\fP set to 1L to allow HTTP/0.9 responses.
+Pass a pointer to a curl_off_t variable to receive the number of seconds the
+HTTP server suggesets the client should wait until the next request is
+issued. The information from the "Retry-After:" header.
 
-A HTTP/0.9 response is a server response entirely without headers and only a
-body. You can connect to lots of random TCP services and still get a response
-that curl might consider to be HTTP/0.9!
+While the HTTP header might contain a fixed date string, the
+\fICURLINFO_RETRY_AFTER(3)\fP will alwaus return number of seconds to wait -
+or zero if there was no header or the header couldn't be parsed.
 .SH DEFAULT
-curl allowed HTTP/0.9 responses by default before 7.66.0
-
-Since 7.66.0, libcurl requires this option set to 1L to allow HTTP/0.9
-responses.
+Returns zero delay if there was no header.
 .SH PROTOCOLS
-HTTP
+HTTP(S)
 .SH EXAMPLE
 .nf
 CURL *curl = curl_easy_init();
 if(curl) {
-  CURLcode ret;
-  curl_easy_setopt(curl, CURLOPT_URL, "https://example.com/");
-  curl_easy_setopt(curl, CURLOPT_HTTP09_ALLOWED, 1L);
-  ret = curl_easy_perform(curl);
+  CURLcode res;
+  curl_easy_setopt(curl, CURLOPT_URL, "http://example.com");
+  res = curl_easy_perform(curl);
+  if(res == CURLE_OK) {
+    curl_off_t wait = 0;
+    curl_easy_getinfo(curl, CURLINFO_RETRY_AFTER, &wait);
+    if(wait)
+      printf("Wait for %" CURL_FORMAT_CURL_OFF_T " seconds\\n", wait);
+  }
+  curl_easy_cleanup(curl);
 }
 .fi
 .SH AVAILABILITY
-Option added in 7.64.0, present along with HTTP.
+Added in curl 7.66.0
 .SH RETURN VALUE
-Returns CURLE_OK if HTTP is supported, and CURLE_UNKNOWN_OPTION if not.
+Returns CURLE_OK if the option is supported, and CURLE_UNKNOWN_OPTION if not.
 .SH "SEE ALSO"
-.BR CURLOPT_SSLVERSION "(3), " CURLOPT_HTTP_VERSION "(3), "
+.BR CURLOPT_STDERR "(3), " CURLOPT_HEADERFUNCTION "(3), "

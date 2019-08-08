@@ -1,5 +1,3 @@
-#ifndef HEADER_CURL_VQUIC_QUICHE_H
-#define HEADER_CURL_VQUIC_QUICHE_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -22,28 +20,47 @@
  *
  ***************************************************************************/
 
-#include "curl_setup.h"
+/* Testing Retry-After header parser */
 
-#ifdef USE_QUICHE
+#include "test.h"
 
-#include <quiche.h>
+#include "memdebug.h"
 
-struct quic_handshake {
-  char *buf;       /* pointer to the buffer */
-  size_t alloclen; /* size of allocation */
-  size_t len;      /* size of content in buffer */
-  size_t nread;    /* how many bytes have been read */
-};
+int test(char *URL)
+{
+  struct curl_slist *header = NULL;
+  curl_off_t retry;
+  CURL *curl = NULL;
+  int res = 0;
 
-struct quicsocket {
-  quiche_config *cfg;
-  quiche_conn *conn;
-  quiche_h3_conn *h3c;
-  quiche_h3_config *h3config;
-  uint8_t scid[QUICHE_MAX_CONN_ID_LEN];
-  uint32_t version;
-};
+  global_init(CURL_GLOBAL_ALL);
 
+  easy_init(curl);
+
+  easy_setopt(curl, CURLOPT_URL, URL);
+
+  res = curl_easy_perform(curl);
+  if(res)
+    goto test_cleanup;
+
+  res = curl_easy_getinfo(curl, CURLINFO_RETRY_AFTER, &retry);
+  if(res)
+    goto test_cleanup;
+
+#ifdef LIB1596
+  /* we get a relative number of seconds, so add the number of seconds
+     we're at to make it a somewhat stable number. Then remove accuracy. */
+  retry += time(NULL);
+  retry /= 10000;
 #endif
+  printf("Retry-After: %" CURL_FORMAT_CURL_OFF_T "\n", retry);
 
-#endif /* HEADER_CURL_VQUIC_QUICHE_H */
+test_cleanup:
+
+  /* always cleanup */
+  curl_easy_cleanup(curl);
+  curl_slist_free_all(header);
+  curl_global_cleanup();
+
+  return res;
+}

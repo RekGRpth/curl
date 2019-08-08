@@ -1930,6 +1930,9 @@ typedef enum {
   /* Bitmask to control HTTP/3 behavior. See CURLH3_* */
   CINIT(H3, LONG, 289),
 
+  /* SASL authorisation identity */
+  CINIT(SASL_AUTHZID, STRINGPOINT, 290),
+
   CURLOPT_LASTENTRY /* the last unused */
 } CURLoption;
 
@@ -1983,7 +1986,9 @@ enum {
   CURL_HTTP_VERSION_2TLS, /* use version 2 for HTTPS, version 1.1 for HTTP */
   CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE,  /* please use HTTP 2 without HTTP/1.1
                                            Upgrade */
-
+  CURL_HTTP_VERSION_3 = 30, /* This cannot be set with CURLOPT_HTTP_VERSION,
+                               use CURLOPT_H3 and/or CURLOPT_ALTSVC to enable
+                               HTTP/3 */
   CURL_HTTP_VERSION_LAST /* *ILLEGAL* http version */
 };
 
@@ -2619,8 +2624,9 @@ typedef enum {
   CURLINFO_STARTTRANSFER_TIME_T = CURLINFO_OFF_T + 54,
   CURLINFO_REDIRECT_TIME_T  = CURLINFO_OFF_T + 55,
   CURLINFO_APPCONNECT_TIME_T = CURLINFO_OFF_T + 56,
+  CURLINFO_RETRY_AFTER      = CURLINFO_OFF_T + 57,
 
-  CURLINFO_LASTONE          = 56
+  CURLINFO_LASTONE          = 57
 } CURLINFO;
 
 /* CURLINFO_RESPONSE_CODE is the new name for the option previously known as
