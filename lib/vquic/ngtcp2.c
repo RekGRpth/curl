@@ -24,6 +24,7 @@
 
 #ifdef USE_NGTCP2
 #include <ngtcp2/ngtcp2.h>
+#include <nghttp3/nghttp3.h>
 #include <openssl/err.h>
 #include "urldata.h"
 #include "sendf.h"
@@ -31,18 +32,40 @@
 #include "rand.h"
 #include "ngtcp2.h"
 #include "ngtcp2-crypto.h"
+#include "multiif.h"
+#include "strcase.h"
+#include "connect.h"
+#include "strerror.h"
 
 /* The last 3 #include files should be in this order */
 #include "curl_printf.h"
 #include "curl_memory.h"
 #include "memdebug.h"
 
+#define DEBUG_HTTP3
+#ifdef DEBUG_HTTP3
+#define H3BUGF(x) x
+#else
+#define H3BUGF(x) do { } WHILE_FALSE
+#endif
+
 #define QUIC_MAX_STREAMS (256*1024)
 #define QUIC_MAX_DATA (1*1024*1024)
-#define QUIC_IDLE_TIMEOUT 60 /* seconds? */
-#define QUIC_CIPHERS "TLS13-AES-128-GCM-SHA256:"                \
-  "TLS13-AES-256-GCM-SHA384:TLS13-CHACHA20-POLY1305-SHA256"
+#define QUIC_IDLE_TIMEOUT 60000 /* milliseconds */
+#define QUIC_CIPHERS                                                          \
+  "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_"               \
+  "POLY1305_SHA256:TLS_AES_128_CCM_SHA256"
 #define QUIC_GROUPS "P-256:X25519:P-384:P-521"
+
+static CURLcode process_ingress(struct connectdata *conn,
+                                curl_socket_t sockfd);
+static CURLcode flush_egress(struct connectdata *conn, int sockfd);
+
+static ngtcp2_tstamp timestamp(void)
+{
+  struct curltime ct = Curl_now();
+  return ct.tv_sec * NGTCP2_SECONDS + ct.tv_usec * NGTCP2_MICROSECONDS;
+}
 
 static void quic_printf(void *user_data, const char *fmt, ...)
 {
@@ -51,6 +74,7 @@ static void quic_printf(void *user_data, const char *fmt, ...)
   va_start(ap, fmt);
   vfprintf(stderr, fmt, ap);
   va_end(ap);
+  fprintf(stderr, "\n");
 }
 
 static int setup_initial_crypto_context(struct connectdata *conn)
@@ -144,18 +168,16 @@ static int setup_initial_crypto_context(struct connectdata *conn)
 
 static void quic_settings(ngtcp2_settings *s)
 {
+  ngtcp2_settings_default(s);
   s->log_printf = quic_printf;
-  s->initial_ts = 0;
+  s->initial_ts = timestamp();
   s->max_stream_data_bidi_local = QUIC_MAX_STREAMS;
   s->max_stream_data_bidi_remote = QUIC_MAX_STREAMS;
   s->max_stream_data_uni = QUIC_MAX_STREAMS;
   s->max_data = QUIC_MAX_DATA;
   s->max_streams_bidi = 1;
-  s->max_streams_uni = 1;
+  s->max_streams_uni = 3;
   s->idle_timeout = QUIC_IDLE_TIMEOUT;
-  s->max_packet_size = NGTCP2_MAX_PKT_SIZE;
-  s->ack_delay_exponent = NGTCP2_DEFAULT_ACK_DELAY_EXPONENT;
-  s->max_ack_delay = NGTCP2_DEFAULT_MAX_ACK_DELAY;
 }
 
 /* SSL extension functions */
@@ -165,7 +187,6 @@ static int transport_params_add_cb(SSL *ssl, unsigned int ext_type,
                                    size_t *outlen, X509 *x,
                                    size_t chainidx, int *al, void *add_arg)
 {
-  int rv;
   struct connectdata *conn = (struct connectdata *)SSL_get_app_data(ssl);
   ngtcp2_transport_params params;
   uint8_t buf[64];
@@ -176,12 +197,7 @@ static int transport_params_add_cb(SSL *ssl, unsigned int ext_type,
   (void)chainidx;
   (void)add_arg;
 
-  rv = ngtcp2_conn_get_local_transport_params(
-    conn->quic.conn, &params, NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO);
-  if(rv) {
-    *al = SSL_AD_INTERNAL_ERROR;
-    return -1;
-  }
+  ngtcp2_conn_get_local_transport_params(conn->quic.conn, &params);
 
   nwrite = ngtcp2_encode_transport_params(
     buf, sizeof(buf), NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO, &params);
@@ -234,9 +250,7 @@ static int transport_params_parse_cb(SSL *ssl, unsigned int ext_type,
     return -1;
   }
 
-  rv = ngtcp2_conn_set_remote_transport_params(
-    conn->quic.conn, NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS,
-    &params);
+  rv = ngtcp2_conn_set_remote_transport_params(conn->quic.conn, &params);
   if(rv) {
     *al = SSL_AD_ILLEGAL_PARAMETER;
     return -1;
@@ -257,8 +271,8 @@ static SSL_CTX *quic_ssl_ctx(struct Curl_easy *data)
 
   SSL_CTX_set_default_verify_paths(ssl_ctx);
 
-  if(SSL_CTX_set_cipher_list(ssl_ctx, QUIC_CIPHERS) != 1) {
-    failf(data, "SSL_CTX_set_cipher_list: %s",
+  if(SSL_CTX_set_ciphersuites(ssl_ctx, QUIC_CIPHERS) != 1) {
+    failf(data, "SSL_CTX_set_ciphersuites: %s",
           ERR_error_string(ERR_get_error(), NULL));
     return NULL;
   }
@@ -328,16 +342,14 @@ static int ssl_on_key(struct connectdata *conn,
     return -1;
   }
 
-  keylen = Curl_qc_derive_packet_protection_key(key, sizeof(key),
-                                                secret, sizeof(secret),
-                                                crypto_ctx);
+  keylen = Curl_qc_derive_packet_protection_key(key, sizeof(key), secret,
+                                                secretlen, crypto_ctx);
   if(keylen < 0) {
     return -1;
   }
 
-  ivlen = Curl_qc_derive_packet_protection_iv(iv, sizeof(iv),
-                                              secret, sizeof(secret),
-                                              crypto_ctx);
+  ivlen = Curl_qc_derive_packet_protection_iv(iv, sizeof(iv), secret,
+                                              secretlen, crypto_ctx);
   if(ivlen < 0) {
     return -1;
   }
@@ -360,6 +372,7 @@ static int ssl_on_key(struct connectdata *conn,
   case SSL_KEY_CLIENT_HANDSHAKE_TRAFFIC:
     ngtcp2_conn_install_handshake_tx_keys(conn->quic.conn, key, keylen,
                                           iv, ivlen, hp, hplen);
+    conn->quic.tx_crypto_level = NGTCP2_CRYPTO_LEVEL_HANDSHAKE;
     break;
   case SSL_KEY_CLIENT_APPLICATION_TRAFFIC:
     ngtcp2_conn_install_tx_keys(conn->quic.conn, key, keylen, iv, ivlen,
@@ -369,10 +382,12 @@ static int ssl_on_key(struct connectdata *conn,
     ngtcp2_conn_install_handshake_rx_keys(conn->quic.conn, key, keylen,
                                           iv, ivlen,
                                           hp, hplen);
+    conn->quic.rx_crypto_level = NGTCP2_CRYPTO_LEVEL_HANDSHAKE;
     break;
   case SSL_KEY_SERVER_APPLICATION_TRAFFIC:
     ngtcp2_conn_install_rx_keys(conn->quic.conn, key, keylen, iv, ivlen,
                                 hp, hplen);
+    conn->quic.rx_crypto_level = NGTCP2_CRYPTO_LEVEL_APP;
     break;
   }
   return 0;
@@ -384,6 +399,7 @@ static void ssl_msg_cb(int write_p, int version, int content_type,
   int rv;
   struct connectdata *conn = (struct connectdata *)user_data;
   uint8_t *msg = (uint8_t *)buf;
+  struct quic_handshake *crypto_data;
   (void)version;
   (void)ssl;
 
@@ -404,7 +420,23 @@ static void ssl_msg_cb(int write_p, int version, int content_type,
     return;
   }
 
-  rv = ngtcp2_conn_submit_crypto_data(conn->quic.conn, buf, len);
+  crypto_data = &conn->quic.client_crypto_data[conn->quic.tx_crypto_level];
+  if(crypto_data->buf == NULL) {
+    crypto_data->buf = malloc(4096);
+    crypto_data->alloclen = 4096;
+    /* TODO Explode if malloc failed */
+  }
+
+  /* TODO Just pretend that handshake does not grow more than 4KiB for
+     now */
+  assert(crypto_data->len + len <= crypto_data->alloclen);
+
+  memcpy(&crypto_data->buf[crypto_data->len], buf, len);
+  crypto_data->len += len;
+
+  rv = ngtcp2_conn_submit_crypto_data(
+      conn->quic.conn, conn->quic.tx_crypto_level,
+      (uint8_t *)(&crypto_data->buf[crypto_data->len] - len), len);
   if(rv) {
     fprintf(stderr, "write_client_handshake failed\n");
   }
@@ -565,10 +597,10 @@ static int quic_init_ssl(struct connectdata *conn)
   SSL_set_key_callback(qs->ssl, ssl_key_cb, conn);
 
   switch(qs->version) {
-#ifdef NGTCP2_PROTO_VER_D17
-  case NGTCP2_PROTO_VER_D17:
-    alpn = (const uint8_t *)NGTCP2_ALPN_D17;
-    alpnlen = strlen(NGTCP2_ALPN_D17);
+#ifdef NGTCP2_PROTO_VER
+  case NGTCP2_PROTO_VER:
+    alpn = (const uint8_t *)NGTCP2_ALPN_H3;
+    alpnlen = sizeof(NGTCP2_ALPN_H3) - 1;
     break;
 #endif
   }
@@ -706,6 +738,7 @@ static int cb_handshake_completed(ngtcp2_conn *tconn, void *user_data)
 {
   struct connectdata *conn = (struct connectdata *)user_data;
   (void)tconn;
+  conn->quic.tx_crypto_level = NGTCP2_CRYPTO_LEVEL_APP;
   infof(conn->data, "QUIC handshake is completed\n");
   return 0;
 }
@@ -803,11 +836,13 @@ static int cb_recv_stream_data(ngtcp2_conn *tconn, int64_t stream_id,
 }
 
 static int cb_acked_crypto_offset(ngtcp2_conn *tconn,
+                                  ngtcp2_crypto_level crypto_level,
                                   uint64_t offset, size_t datalen,
                                   void *user_data)
 {
   struct connectdata *conn = (struct connectdata *)user_data;
   (void)conn;
+  (void)crypto_level;
   (void)tconn;
   (void)offset;
   (void)datalen;
@@ -836,7 +871,7 @@ cb_acked_stream_data_offset(ngtcp2_conn *tconn, int64_t stream_id,
 }
 
 static int cb_stream_close(ngtcp2_conn *tconn, int64_t stream_id,
-                           uint16_t app_error_code,
+                           uint64_t app_error_code,
                            void *user_data, void *stream_user_data)
 {
   struct connectdata *conn = (struct connectdata *)user_data;
@@ -899,8 +934,9 @@ static ssize_t cb_hp_mask(ngtcp2_conn *tconn, uint8_t *dest, size_t destlen,
   return nwrite;
 }
 
-static int cb_extend_max_streams_bidi(ngtcp2_conn *tconn, uint64_t max_streams,
-                                      void *user_data)
+static int cb_extend_max_local_streams_bidi(ngtcp2_conn *tconn,
+                                            uint64_t max_streams,
+                                            void *user_data)
 {
   /* struct connectdata *conn = (struct connectdata *)user_data; */
   (void)tconn;
@@ -919,11 +955,12 @@ static int cb_get_new_connection_id(ngtcp2_conn *tconn, ngtcp2_cid *cid,
 
   result = Curl_rand(conn->data, cid->data, cidlen);
   if(result)
-    return 1;
+    return NGTCP2_ERR_CALLBACK_FAILURE;
+  cid->datalen = cidlen;
 
   result = Curl_rand(conn->data, token, NGTCP2_STATELESS_RESET_TOKENLEN);
   if(result)
-    return 1;
+    return NGTCP2_ERR_CALLBACK_FAILURE;
 
   return 0;
 }
@@ -949,8 +986,8 @@ static void quic_callbacks(ngtcp2_conn_callbacks *c)
   c->stream_close = cb_stream_close;
   /* recv_stateless_reset = NULL */
   c->recv_retry = cb_recv_retry;
-  c->extend_max_streams_bidi = cb_extend_max_streams_bidi;
-  /* extend_max_streams_uni = NULL */
+  c->extend_max_local_streams_bidi = cb_extend_max_local_streams_bidi;
+  /* extend_max_local_streams_uni = NULL */
   /* rand = NULL */
   c->get_new_connection_id = cb_get_new_connection_id;
   /* remove_connection_id = NULL */
@@ -963,14 +1000,15 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
                            socklen_t addrlen)
 {
   int rc;
+  int rv;
   struct quicsocket *qs = &conn->quic;
   CURLcode result;
   ngtcp2_path path; /* TODO: this must be initialized properly */
-  (void)sockfd;
   (void)addr;
   (void)addrlen;
   infof(conn->data, "Connecting socket %d over QUIC\n", sockfd);
 
+  qs->version = NGTCP2_PROTO_VER;
   qs->sslctx = quic_ssl_ctx(conn->data);
   if(!qs->sslctx)
     return CURLE_FAILED_INIT; /* TODO: better return code */
@@ -991,14 +1029,27 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
   quic_settings(&qs->settings);
   quic_callbacks(&qs->callbacks);
 
-#ifdef NGTCP2_PROTO_VER_D18
-#define QUICVER NGTCP2_PROTO_VER_D18
+  qs->tx_crypto_level = NGTCP2_CRYPTO_LEVEL_INITIAL;
+  qs->rx_crypto_level = NGTCP2_CRYPTO_LEVEL_INITIAL;
+
+  qs->local_addrlen = sizeof(qs->local_addr);
+  rv = getsockname(sockfd, (struct sockaddr *)&qs->local_addr,
+                   &qs->local_addrlen);
+  if(rv == -1) {
+    return CURLE_FAILED_INIT;
+  }
+
+  ngtcp2_addr_init(&path.local, (uint8_t *)&qs->local_addr, qs->local_addrlen,
+                   NULL);
+  ngtcp2_addr_init(&path.remote, (uint8_t*)addr, addrlen, NULL);
+
+#ifdef NGTCP2_PROTO_VER
+#define QUICVER NGTCP2_PROTO_VER
 #else
 #error "unsupported ngtcp2 version"
 #endif
-  rc = ngtcp2_conn_client_new(&qs->conn, &qs->dcid, &qs->scid,
-                              &path,
-                              QUICVER, &qs->callbacks, &qs->settings, conn);
+  rc = ngtcp2_conn_client_new(&qs->conn, &qs->dcid, &qs->scid, &path, QUICVER,
+                              &qs->callbacks, &qs->settings, NULL, conn);
   if(rc)
     return CURLE_FAILED_INIT; /* TODO: create a QUIC error code */
 
@@ -1015,15 +1066,634 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
  */
 int Curl_quic_ver(char *p, size_t len)
 {
-  return msnprintf(p, len, " ngtcp2/blabla");
+  return msnprintf(p, len, " ngtcp2/blabla nghttp3/bloblo");
+}
+
+static int ng_getsock(struct connectdata *conn, curl_socket_t *socks)
+{
+  struct SingleRequest *k = &conn->data->req;
+  int bitmap = GETSOCK_BLANK;
+
+  socks[0] = conn->sock[FIRSTSOCKET];
+
+  /* in a HTTP/2 connection we can basically always get a frame so we should
+     always be ready for one */
+  bitmap |= GETSOCK_READSOCK(FIRSTSOCKET);
+
+  /* we're still uploading or the HTTP/2 layer wants to send data */
+  if((k->keepon & (KEEP_SEND|KEEP_SEND_PAUSE)) == KEEP_SEND)
+    bitmap |= GETSOCK_WRITESOCK(FIRSTSOCKET);
+
+  return bitmap;
+}
+
+static int ng_perform_getsock(const struct connectdata *conn,
+                              curl_socket_t *socks)
+{
+  return ng_getsock((struct connectdata *)conn, socks);
+}
+
+static CURLcode ng_disconnect(struct connectdata *conn,
+                                  bool dead_connection)
+{
+  (void)conn;
+  (void)dead_connection;
+  return CURLE_OK;
+}
+
+static unsigned int ng_conncheck(struct connectdata *conn,
+                                 unsigned int checks_to_perform)
+{
+  (void)conn;
+  (void)checks_to_perform;
+  return CONNRESULT_NONE;
+}
+
+static const struct Curl_handler Curl_handler_h3_quiche = {
+  "HTTPS",                              /* scheme */
+  ZERO_NULL,                            /* setup_connection */
+  Curl_http,                            /* do_it */
+  Curl_http_done,                       /* done */
+  ZERO_NULL,                            /* do_more */
+  ZERO_NULL,                            /* connect_it */
+  ZERO_NULL,                            /* connecting */
+  ZERO_NULL,                            /* doing */
+  ng_getsock,                           /* proto_getsock */
+  ng_getsock,                           /* doing_getsock */
+  ZERO_NULL,                            /* domore_getsock */
+  ng_perform_getsock,                   /* perform_getsock */
+  ng_disconnect,                        /* disconnect */
+  ZERO_NULL,                            /* readwrite */
+  ng_conncheck,                         /* connection_check */
+  PORT_HTTP,                            /* defport */
+  CURLPROTO_HTTPS,                      /* protocol */
+  PROTOPT_SSL | PROTOPT_STREAM          /* flags */
+};
+
+static int cb_h3_stream_close(nghttp3_conn *conn, int64_t stream_id,
+                              uint64_t app_error_code, void *user_data,
+                              void *stream_user_data)
+{
+  (void)conn;
+  (void)stream_id;
+  (void)app_error_code;
+  (void)user_data;
+  (void)stream_user_data;
+  fprintf(stderr, "cb_h3_stream_close CALLED\n");
+  return 0;
+}
+
+static int cb_h3_recv_data(nghttp3_conn *conn, int64_t stream_id,
+                           const uint8_t *data, size_t datalen,
+                           void *user_data, void *stream_user_data)
+{
+  (void)conn;
+  (void)stream_id;
+  (void)data;
+  (void)datalen;
+  (void)user_data;
+  (void)stream_user_data;
+  fprintf(stderr, "cb_h3_recv_data CALLED\n");
+  return 0;
+}
+
+static int cb_h3_deferred_consume(nghttp3_conn *conn, int64_t stream_id,
+                                  size_t consumed, void *user_data,
+                                  void *stream_user_data)
+{
+  (void)conn;
+  (void)stream_id;
+  (void)consumed;
+  (void)user_data;
+  (void)stream_user_data;
+  fprintf(stderr, "cb_h3_deferred_consume CALLED\n");
+  return 0;
+}
+
+static int cb_h3_begin_headers(nghttp3_conn *conn, int64_t stream_id,
+                               void *user_data, void *stream_user_data)
+{
+  (void)conn;
+  (void)stream_id;
+  (void)user_data;
+  (void)stream_user_data;
+  fprintf(stderr, "cb_h3_begin_headers CALLED\n");
+  return 0;
+}
+
+static int cb_h3_recv_header(nghttp3_conn *conn, int64_t stream_id,
+                             int32_t token, nghttp3_rcbuf *name,
+                             nghttp3_rcbuf *value, uint8_t flags,
+                             void *user_data, void *stream_user_data)
+{
+  (void)conn;
+  (void)stream_id;
+  (void)token;
+  (void)name;
+  (void)value;
+  (void)flags;
+  (void)user_data;
+  (void)stream_user_data;
+  fprintf(stderr, "cb_h3_recv_header CALLED\n");
+  return 0;
+}
+
+static int cb_h3_send_stop_sending(nghttp3_conn *conn, int64_t stream_id,
+                                   uint64_t app_error_code,
+                                   void *user_data,
+                                   void *stream_user_data)
+{
+  (void)conn;
+  (void)stream_id;
+  (void)app_error_code;
+  (void)user_data;
+  (void)stream_user_data;
+  fprintf(stderr, "cb_h3_send_stop_sending CALLED\n");
+  return 0;
+}
+
+static nghttp3_conn_callbacks ngh3_callbacks = {
+  NULL, /* acked_stream_data */
+  cb_h3_stream_close,
+  cb_h3_recv_data,
+  cb_h3_deferred_consume,
+  cb_h3_begin_headers,
+  cb_h3_recv_header,
+  NULL, /* end_headers */
+  NULL, /* begin_trailers */
+  cb_h3_recv_header,
+  NULL, /* end_trailers */
+  NULL, /* http_begin_push_promise */
+  NULL, /* http_recv_push_promise */
+  NULL, /* http_end_push_promise */
+  NULL, /* http_cancel_push */
+  cb_h3_send_stop_sending,
+  NULL, /* push_stream */
+};
+
+static Curl_recv ngh3_stream_recv;
+static Curl_send ngh3_stream_send;
+
+static ssize_t ngh3_stream_recv(struct connectdata *conn,
+                                int sockindex,
+                                char *buf,
+                                size_t buffersize,
+                                CURLcode *curlcode)
+{
+  (void)conn;
+  (void)sockindex;
+  (void)buf;
+  (void)buffersize;
+  (void)curlcode;
+  return 0;
+}
+
+/* Index where :authority header field will appear in request header
+   field list. */
+#define AUTHORITY_DST_IDX 3
+
+static CURLcode http_request(struct connectdata *conn, const void *mem,
+                             size_t len)
+{
+  /*
+   */
+  struct HTTP *stream = conn->data->req.protop;
+  size_t nheader;
+  size_t i;
+  size_t authority_idx;
+  char *hdbuf = (char *)mem;
+  char *end, *line_end;
+  struct quicsocket *qs = &conn->quic;
+  CURLcode result = CURLE_OK;
+  struct Curl_easy *data = conn->data;
+  nghttp3_nv *nva = NULL;
+  int64_t stream3_id;
+  int rc;
+
+  rc = ngtcp2_conn_open_bidi_stream(qs->conn, &stream3_id, NULL);
+  if(rc) {
+    failf(conn->data, "can get bidi streams");
+    result = CURLE_SEND_ERROR;
+    goto fail;
+  }
+
+  stream->stream3_id = stream3_id;
+  stream->h3req = TRUE; /* senf off! */
+
+  /* Calculate number of headers contained in [mem, mem + len). Assumes a
+     correctly generated HTTP header field block. */
+  nheader = 0;
+  for(i = 1; i < len; ++i) {
+    if(hdbuf[i] == '\n' && hdbuf[i - 1] == '\r') {
+      ++nheader;
+      ++i;
+    }
+  }
+  if(nheader < 2)
+    goto fail;
+
+  /* We counted additional 2 \r\n in the first and last line. We need 3
+     new headers: :method, :path and :scheme. Therefore we need one
+     more space. */
+  nheader += 1;
+  nva = malloc(sizeof(nghttp3_nv) * nheader);
+  if(!nva) {
+    result = CURLE_OUT_OF_MEMORY;
+    goto fail;
+  }
+
+  /* Extract :method, :path from request line
+     We do line endings with CRLF so checking for CR is enough */
+  line_end = memchr(hdbuf, '\r', len);
+  if(!line_end) {
+    result = CURLE_BAD_FUNCTION_ARGUMENT; /* internal error */
+    goto fail;
+  }
+
+  /* Method does not contain spaces */
+  end = memchr(hdbuf, ' ', line_end - hdbuf);
+  if(!end || end == hdbuf)
+    goto fail;
+  nva[0].name = (unsigned char *)":method";
+  nva[0].namelen = strlen((char *)nva[0].name);
+  nva[0].value = (unsigned char *)hdbuf;
+  nva[0].valuelen = (size_t)(end - hdbuf);
+
+  hdbuf = end + 1;
+
+  /* Path may contain spaces so scan backwards */
+  end = NULL;
+  for(i = (size_t)(line_end - hdbuf); i; --i) {
+    if(hdbuf[i - 1] == ' ') {
+      end = &hdbuf[i - 1];
+      break;
+    }
+  }
+  if(!end || end == hdbuf)
+    goto fail;
+  nva[1].name = (unsigned char *)":path";
+  nva[1].namelen = strlen((char *)nva[1].name);
+  nva[1].value = (unsigned char *)hdbuf;
+  nva[1].valuelen = (size_t)(end - hdbuf);
+
+  nva[2].name = (unsigned char *)":scheme";
+  nva[2].namelen = strlen((char *)nva[2].name);
+  if(conn->handler->flags & PROTOPT_SSL)
+    nva[2].value = (unsigned char *)"https";
+  else
+    nva[2].value = (unsigned char *)"http";
+  nva[2].valuelen = strlen((char *)nva[2].value);
+
+
+  authority_idx = 0;
+  i = 3;
+  while(i < nheader) {
+    size_t hlen;
+
+    hdbuf = line_end + 2;
+
+    /* check for next CR, but only within the piece of data left in the given
+       buffer */
+    line_end = memchr(hdbuf, '\r', len - (hdbuf - (char *)mem));
+    if(!line_end || (line_end == hdbuf))
+      goto fail;
+
+    /* header continuation lines are not supported */
+    if(*hdbuf == ' ' || *hdbuf == '\t')
+      goto fail;
+
+    for(end = hdbuf; end < line_end && *end != ':'; ++end)
+      ;
+    if(end == hdbuf || end == line_end)
+      goto fail;
+    hlen = end - hdbuf;
+
+    if(hlen == 4 && strncasecompare("host", hdbuf, 4)) {
+      authority_idx = i;
+      nva[i].name = (unsigned char *)":authority";
+      nva[i].namelen = strlen((char *)nva[i].name);
+    }
+    else {
+      nva[i].name = (unsigned char *)hdbuf;
+      nva[i].namelen = (size_t)(end - hdbuf);
+    }
+    hdbuf = end + 1;
+    while(*hdbuf == ' ' || *hdbuf == '\t')
+      ++hdbuf;
+    end = line_end;
+
+#if 0 /* This should probably go in more or less like this */
+    switch(inspect_header((const char *)nva[i].name, nva[i].namelen, hdbuf,
+                          end - hdbuf)) {
+    case HEADERINST_IGNORE:
+      /* skip header fields prohibited by HTTP/2 specification. */
+      --nheader;
+      continue;
+    case HEADERINST_TE_TRAILERS:
+      nva[i].value = (uint8_t*)"trailers";
+      nva[i].value_len = sizeof("trailers") - 1;
+      break;
+    default:
+      nva[i].value = (unsigned char *)hdbuf;
+      nva[i].value_len = (size_t)(end - hdbuf);
+    }
+#endif
+    nva[i].value = (unsigned char *)hdbuf;
+    nva[i].valuelen = (size_t)(end - hdbuf);
+
+    ++i;
+  }
+
+  /* :authority must come before non-pseudo header fields */
+  if(authority_idx != 0 && authority_idx != AUTHORITY_DST_IDX) {
+    nghttp3_nv authority = nva[authority_idx];
+    for(i = authority_idx; i > AUTHORITY_DST_IDX; --i) {
+      nva[i] = nva[i - 1];
+    }
+    nva[i] = authority;
+  }
+
+  /* Warn stream may be rejected if cumulative length of headers is too
+     large. */
+#define MAX_ACC 60000  /* <64KB to account for some overhead */
+  {
+    size_t acc = 0;
+
+    for(i = 0; i < nheader; ++i) {
+      acc += nva[i].namelen + nva[i].valuelen;
+
+      H3BUGF(infof(data, "h3 [%.*s: %.*s]\n",
+                   nva[i].namelen, nva[i].name,
+                   nva[i].valuelen, nva[i].value));
+    }
+
+    if(acc > MAX_ACC) {
+      infof(data, "http_request: Warning: The cumulative length of all "
+            "headers exceeds %zu bytes and that could cause the "
+            "stream to be rejected.\n", MAX_ACC);
+    }
+  }
+
+  switch(data->set.httpreq) {
+  case HTTPREQ_POST:
+  case HTTPREQ_POST_FORM:
+  case HTTPREQ_POST_MIME:
+  case HTTPREQ_PUT:
+    if(data->state.infilesize != -1)
+      stream->upload_left = data->state.infilesize;
+    else
+      /* data sending without specifying the data amount up front */
+      stream->upload_left = -1; /* unknown, but not zero */
+
+#if 0
+    stream3_id = quiche_h3_send_request(qs->h3c, qs->conn, nva, nheader,
+                                        stream->upload_left ? FALSE: TRUE);
+    if((stream3_id >= 0) && data->set.postfields) {
+      ssize_t sent = quiche_h3_send_body(qs->h3c, qs->conn, stream3_id,
+                                         (uint8_t *)data->set.postfields,
+                                         stream->upload_left, TRUE);
+      if(sent <= 0) {
+        failf(data, "quiche_h3_send_body failed!");
+        result = CURLE_SEND_ERROR;
+      }
+      stream->upload_left = 0; /* nothing left to send */
+    }
+#endif
+    break;
+  default:
+    rc = nghttp3_conn_submit_request(qs->h3conn, stream->stream3_id,
+                                     nva, nheader,
+                                     NULL, /* no body! */
+                                     conn->data);
+    if(rc) {
+      result = CURLE_SEND_ERROR;
+      goto fail;
+    }
+    break;
+  }
+
+  Curl_safefree(nva);
+
+  infof(data, "Using HTTP/3 Stream ID: %x (easy handle %p)\n",
+        stream3_id, (void *)data);
+
+  return CURLE_OK;
+
+fail:
+  free(nva);
+  return result;
+}
+static ssize_t ngh3_stream_send(struct connectdata *conn,
+                                int sockindex,
+                                const void *mem,
+                                size_t len,
+                                CURLcode *curlcode)
+{
+  ssize_t sent;
+  struct quicsocket *qs = &conn->quic;
+  curl_socket_t sockfd = conn->sock[sockindex];
+  struct HTTP *stream = conn->data->req.protop;
+
+  if(!stream->h3req) {
+    CURLcode result = http_request(conn, mem, len);
+    if(result) {
+      *curlcode = CURLE_SEND_ERROR;
+      return -1;
+    }
+    sent = len;
+  }
+  else {
+    (void)qs;
+    /* TODO */
+  }
+
+  if(flush_egress(conn, sockfd)) {
+    *curlcode = CURLE_SEND_ERROR;
+    return -1;
+  }
+
+  *curlcode = CURLE_OK;
+  return sent;
+}
+
+static CURLcode ng_has_connected(struct connectdata *conn,
+                                   int sockindex)
+{
+  CURLcode result;
+  struct quicsocket *qs = &conn->quic;
+  int rc;
+
+  conn->recv[sockindex] = ngh3_stream_recv;
+  conn->send[sockindex] = ngh3_stream_send;
+  conn->handler = &Curl_handler_h3_quiche;
+  conn->bits.multiplex = TRUE; /* at least potentially multiplexed */
+  conn->httpversion = 30;
+  conn->bundle->multiuse = BUNDLE_MULTIPLEX;
+
+  if(ngtcp2_conn_get_max_local_streams_uni(qs->conn) < 3) {
+    failf(conn->data, "too few available QUIC streams");
+    return CURLE_SEND_ERROR;
+  }
+
+  nghttp3_conn_settings_default(&qs->h3settings);
+
+  rc = nghttp3_conn_client_new(&qs->h3conn,
+                               &ngh3_callbacks,
+                               &qs->h3settings,
+                               nghttp3_mem_default(),
+                               conn->data);
+  if(rc) {
+    result = CURLE_OUT_OF_MEMORY;
+    goto fail;
+  }
+
+  return CURLE_OK;
+  fail:
+
+  return result;
 }
 
 CURLcode Curl_quic_is_connected(struct connectdata *conn, int sockindex,
                                 bool *done)
 {
-  (void)conn;
-  (void)sockindex;
-  *done = FALSE;
+  CURLcode result;
+  struct quicsocket *qs = &conn->quic;
+  curl_socket_t sockfd = conn->sock[sockindex];
+
+  result = process_ingress(conn, sockfd);
+  if(result)
+    return result;
+
+  result = flush_egress(conn, sockfd);
+  if(result)
+    return result;
+
+  if(ngtcp2_conn_get_handshake_completed(qs->conn)) {
+    *done = TRUE;
+    result = ng_has_connected(conn, sockindex);
+    DEBUGF(infof(conn->data, "ngtcp2 established connection!\n"));
+  }
+
+  return result;
+}
+
+static CURLcode process_ingress(struct connectdata *conn, int sockfd)
+{
+  ssize_t recvd;
+  int rv;
+  struct quicsocket *qs = &conn->quic;
+  struct Curl_easy *data = conn->data;
+  uint8_t *buf = (uint8_t *)data->state.buffer;
+  size_t bufsize = data->set.buffer_size;
+  struct sockaddr_storage remote_addr;
+  socklen_t remote_addrlen;
+  ngtcp2_path path;
+  ngtcp2_tstamp ts = timestamp();
+
+  for(;;) {
+    remote_addrlen = sizeof(remote_addr);
+    while((recvd = recvfrom(sockfd, buf, bufsize, MSG_DONTWAIT,
+                            (struct sockaddr *)&remote_addr,
+                            &remote_addrlen)) == -1 &&
+          errno == EINTR)
+      ;
+    if(recvd == -1) {
+      if(errno == EAGAIN || errno == EWOULDBLOCK)
+        break;
+
+      failf(conn->data, "ngtcp2: recvfrom() unexpectedly returned %d", recvd);
+      return CURLE_RECV_ERROR;
+    }
+
+    ngtcp2_addr_init(&path.local, (uint8_t *)&qs->local_addr,
+                     qs->local_addrlen, NULL);
+    ngtcp2_addr_init(&path.remote, (uint8_t *)&remote_addr, remote_addrlen,
+                     NULL);
+
+    rv = ngtcp2_conn_read_pkt(qs->conn, &path, buf, recvd, ts);
+    if(rv != 0) {
+      /* TODO Send CONNECTION_CLOSE if possible */
+      return CURLE_RECV_ERROR;
+    }
+  }
+
+  return CURLE_OK;
+}
+
+static CURLcode flush_egress(struct connectdata *conn, int sockfd)
+{
+  int rv;
+  ssize_t sent;
+  ssize_t outlen;
+  struct quicsocket *qs = &conn->quic;
+  uint8_t out[NGTCP2_MAX_PKTLEN_IPV4];
+  size_t pktlen;
+  ngtcp2_path_storage ps;
+  ngtcp2_tstamp ts = timestamp();
+  struct sockaddr_storage remote_addr;
+  ngtcp2_tstamp expiry;
+  ngtcp2_duration timeout;
+
+  switch(qs->local_addr.ss_family) {
+  case AF_INET:
+    pktlen = NGTCP2_MAX_PKTLEN_IPV4;
+    break;
+  case AF_INET6:
+    pktlen = NGTCP2_MAX_PKTLEN_IPV6;
+    break;
+  default:
+    assert(0);
+  }
+
+  rv = ngtcp2_conn_handle_expiry(qs->conn, ts);
+  if(rv != 0) {
+    failf(conn->data, "ngtcp2_conn_handle_expiry returned error: %s\n",
+          ngtcp2_strerror(rv));
+    return CURLE_SEND_ERROR;
+  }
+
+  ngtcp2_path_storage_zero(&ps);
+
+  for(;;) {
+    outlen = ngtcp2_conn_write_pkt(qs->conn, &ps.path, out, pktlen, ts);
+    if(outlen < 0) {
+      failf(conn->data, "ngtcp2_conn_write_pkt returned error: %s\n",
+            ngtcp2_strerror((int)outlen));
+      return CURLE_SEND_ERROR;
+    }
+    if(outlen == 0)
+      break;
+
+    memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
+    while((sent = sendto(sockfd, out, outlen, MSG_DONTWAIT,
+                         (struct sockaddr *)&remote_addr,
+                         (socklen_t)ps.path.remote.addrlen)) == -1 &&
+          errno == EINTR)
+      ;
+
+    if(sent == -1) {
+      if(errno == EAGAIN || errno == EWOULDBLOCK) {
+        /* TODO Cache packet */
+        break;
+      }
+      else {
+        failf(conn->data, "sendto() returned %zd\n", sent);
+        return CURLE_SEND_ERROR;
+      }
+    }
+  }
+
+  expiry = ngtcp2_conn_get_expiry(qs->conn);
+  if(expiry != UINT64_MAX) {
+    if(expiry <= ts) {
+      timeout = NGTCP2_MILLISECONDS;
+    }
+    else {
+      timeout = expiry - ts;
+    }
+    Curl_expire(conn->data, timeout / NGTCP2_MILLISECONDS, EXPIRE_QUIC);
+  }
+
   return CURLE_OK;
 }
 #endif

@@ -883,7 +883,7 @@ typedef enum {
 
 /* CURLALTSVC_* are bits for the CURLOPT_ALTSVC_CTRL option */
 #define CURLALTSVC_IMMEDIATELY  (1<<0)
-#define CURLALTSVC_ALTUSED      (1<<1)
+
 #define CURLALTSVC_READONLYFILE (1<<2)
 #define CURLALTSVC_H1           (1<<3)
 #define CURLALTSVC_H2           (1<<4)
@@ -920,10 +920,6 @@ typedef enum {
 #define CURLPROTO_SMBS   (1<<27)
 #define CURLPROTO_SSH    (1<<28)
 #define CURLPROTO_ALL    (~0) /* enable everything */
-
-/* bitmask defines for CURLOPT_H3 */
-#define CURLH3_DIRECT (1<<0) /* go QUIC + HTTP/3 directly to the given host +
-                                port */
 
 /* long may be 32 or 64 bits, but we should never depend on anything else
    but 32 */
@@ -1927,11 +1923,8 @@ typedef enum {
   /* maximum age of a connection to consider it for reuse (in seconds) */
   CINIT(MAXAGE_CONN, LONG, 288),
 
-  /* Bitmask to control HTTP/3 behavior. See CURLH3_* */
-  CINIT(H3, LONG, 289),
-
   /* SASL authorisation identity */
-  CINIT(SASL_AUTHZID, STRINGPOINT, 290),
+  CINIT(SASL_AUTHZID, STRINGPOINT, 289),
 
   CURLOPT_LASTENTRY /* the last unused */
 } CURLoption;
@@ -1986,9 +1979,8 @@ enum {
   CURL_HTTP_VERSION_2TLS, /* use version 2 for HTTPS, version 1.1 for HTTP */
   CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE,  /* please use HTTP 2 without HTTP/1.1
                                            Upgrade */
-  CURL_HTTP_VERSION_3 = 30, /* This cannot be set with CURLOPT_HTTP_VERSION,
-                               use CURLOPT_H3 and/or CURLOPT_ALTSVC to enable
-                               HTTP/3 */
+  CURL_HTTP_VERSION_3 = 30, /* Makes use of explicit HTTP/3 without fallback.
+                               Use CURLOPT_ALTSVC to enable HTTP/3 upgrade */
   CURL_HTTP_VERSION_LAST /* *ILLEGAL* http version */
 };
 

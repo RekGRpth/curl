@@ -169,10 +169,10 @@ static CURLcode http_setup_conn(struct connectdata *conn)
   Curl_mime_initpart(&http->form, conn->data);
   data->req.protop = http;
 
-  if(data->set.h3opts & CURLH3_DIRECT) {
+  if(data->set.httpversion == CURL_HTTP_VERSION_3) {
     if(conn->handler->flags & PROTOPT_SSL)
-      /* Only go h3-direct on HTTPS URLs. It needs a UDP socket and does the
-         QUIC dance. */
+      /* Only go HTTP/3 directly on HTTPS URLs. It needs a UDP socket and does
+         the QUIC dance. */
       conn->transport = TRNSPRT_QUIC;
     else {
       failf(data, "HTTP/3 requested for non-HTTPS URL");
@@ -1666,6 +1666,12 @@ static bool use_http_1_1plus(const struct Curl_easy *data,
 static const char *get_http_string(const struct Curl_easy *data,
                                    const struct connectdata *conn)
 {
+#ifdef ENABLE_QUIC
+  if((data->set.httpversion == CURL_HTTP_VERSION_3) ||
+     (conn->httpversion == 30))
+    return "3";
+#endif
+
 #ifdef USE_NGHTTP2
   if(conn->proto.httpc.h2)
     return "2";
@@ -1998,55 +2004,57 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
   const char *httpstring;
   Curl_send_buffer *req_buffer;
   curl_off_t postsize = 0; /* curl_off_t to handle large file sizes */
+  char *altused = NULL;
 
   /* Always consider the DO phase done after this function call, even if there
      may be parts of the request that is not yet sent, since we can deal with
      the rest of the request in the PERFORM phase. */
   *done = TRUE;
 
-  if(conn->httpversion < 20) { /* unless the connection is re-used and already
-                                  http2 */
-    switch(conn->negnpn) {
-    case CURL_HTTP_VERSION_2:
-      conn->httpversion = 20; /* we know we're on HTTP/2 now */
-
-      result = Curl_http2_switched(conn, NULL, 0);
-      if(result)
-        return result;
-      break;
-    case CURL_HTTP_VERSION_1_1:
-      /* continue with HTTP/1.1 when explicitly requested */
-      break;
-    default:
-      /* Check if user wants to use HTTP/2 with clear TCP*/
-#ifdef USE_NGHTTP2
-      if(conn->data->set.httpversion ==
-         CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE) {
-        if(conn->bits.httpproxy && !conn->bits.tunnel_proxy) {
-          /* We don't support HTTP/2 proxies yet. Also it's debatable whether
-             or not this setting should apply to HTTP/2 proxies. */
-          infof(data, "Ignoring HTTP/2 prior knowledge due to proxy\n");
-          break;
-        }
-
-        DEBUGF(infof(data, "HTTP/2 over clean TCP\n"));
-        conn->httpversion = 20;
+  if(conn->transport != TRNSPRT_QUIC) {
+    if(conn->httpversion < 20) { /* unless the connection is re-used and
+                                    already http2 */
+      switch(conn->negnpn) {
+      case CURL_HTTP_VERSION_2:
+        conn->httpversion = 20; /* we know we're on HTTP/2 now */
 
         result = Curl_http2_switched(conn, NULL, 0);
         if(result)
           return result;
-      }
+        break;
+      case CURL_HTTP_VERSION_1_1:
+        /* continue with HTTP/1.1 when explicitly requested */
+        break;
+      default:
+        /* Check if user wants to use HTTP/2 with clear TCP*/
+#ifdef USE_NGHTTP2
+        if(conn->data->set.httpversion ==
+           CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE) {
+          if(conn->bits.httpproxy && !conn->bits.tunnel_proxy) {
+            /* We don't support HTTP/2 proxies yet. Also it's debatable
+               whether or not this setting should apply to HTTP/2 proxies. */
+            infof(data, "Ignoring HTTP/2 prior knowledge due to proxy\n");
+            break;
+          }
+
+          DEBUGF(infof(data, "HTTP/2 over clean TCP\n"));
+          conn->httpversion = 20;
+
+          result = Curl_http2_switched(conn, NULL, 0);
+          if(result)
+            return result;
+        }
 #endif
-      break;
+        break;
+      }
+    }
+    else {
+      /* prepare for a http2 request */
+      result = Curl_http2_setup(conn);
+      if(result)
+        return result;
     }
   }
-  else {
-    /* prepare for a http2 request */
-    result = Curl_http2_setup(conn);
-    if(result)
-      return result;
-  }
-
   http = data->req.protop;
   DEBUGASSERT(http);
 
@@ -2592,6 +2600,14 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
   if(result)
     return result;
 
+#ifdef USE_ALTSVC
+  if(conn->bits.altused && !Curl_checkheaders(conn, "Alt-Used")) {
+    altused = aprintf("Alt-Used: %s:%d\r\n",
+                      conn->conn_to_host.name, conn->conn_to_port);
+    if(!altused)
+      return CURLE_OUT_OF_MEMORY;
+  }
+#endif
   result =
     Curl_add_bufferf(&req_buffer,
                      "%s" /* ftp typecode (;type=x) */
@@ -2606,7 +2622,8 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
                      "%s" /* accept-encoding */
                      "%s" /* referer */
                      "%s" /* Proxy-Connection */
-                     "%s",/* transfer-encoding */
+                     "%s" /* transfer-encoding */
+                     "%s",/* Alt-Used */
 
                      ftp_typecode,
                      httpstring,
@@ -2632,13 +2649,15 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
                       !conn->bits.tunnel_proxy &&
                       !Curl_checkProxyheaders(conn, "Proxy-Connection"))?
                      "Proxy-Connection: Keep-Alive\r\n":"",
-                     te
+                     te,
+                     altused ? altused : ""
       );
 
   /* clear userpwd and proxyuserpwd to avoid re-using old credentials
    * from re-used connections */
   Curl_safefree(conn->allocptr.userpwd);
   Curl_safefree(conn->allocptr.proxyuserpwd);
+  free(altused);
 
   if(result)
     return result;

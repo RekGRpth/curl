@@ -405,6 +405,7 @@ struct ConnectBits {
                          the first time on the first connect function call */
   bit close:1; /* if set, we close the connection after this request */
   bit reuse:1; /* if set, this is a re-used connection */
+  bit altused:1; /* this is an alt-svc "redirect" */
   bit conn_to_host:1; /* if set, this connection has a "connect to host"
                          that overrides the host in the URL */
   bit conn_to_port:1; /* if set, this connection has a "connect to port"
@@ -1680,7 +1681,6 @@ struct UserDefined {
   CURLU *uh; /* URL handle for the current parsed URL */
   void *trailer_data; /* pointer to pass to trailer data callback */
   curl_trailer_callback trailer_callback; /* trailing data callback */
-  long h3opts; /* the CURLOPT_H3 bitmask */
   bit is_fread_set:1; /* has read callback been set to non-NULL? */
   bit is_fwrite_set:1; /* has write callback been set to non-NULL? */
   bit free_referer:1; /* set TRUE if 'referer' points to a string we
