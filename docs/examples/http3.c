@@ -19,20 +19,36 @@
  * KIND, either express or implied.
  *
  ***************************************************************************/
+/* <DESC>
+ * Very simple HTTP/3 GET
+ * </DESC>
+ */
+#include <stdio.h>
+#include <curl/curl.h>
 
-#include "curl_setup.h"
-
-#ifdef ENABLE_QUIC
-#include "quic.h"
-/* backend-independent QUIC functionality */
-const char *Curl_quic_backend(void)
+int main(void)
 {
-#ifdef USE_NGTCP2
-  return "ngtcp2";
-#endif
-#ifdef USE_QUICHE
-  return "quiche";
-#endif
-}
-#endif
+  CURL *curl;
+  CURLcode res;
 
+  curl = curl_easy_init();
+  if(curl) {
+    curl_easy_setopt(curl, CURLOPT_URL, "https://example.com");
+
+    /* Forcing HTTP/3 will make the connection fail if the server isn't
+       accessible over QUIC + HTTP/3 on the given host and port.
+       Consider using CURLOPT_ALTSVC instead! */
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_3);
+
+    /* Perform the request, res will get the return code */
+    res = curl_easy_perform(curl);
+    /* Check for errors */
+    if(res != CURLE_OK)
+      fprintf(stderr, "curl_easy_perform() failed: %s\n",
+              curl_easy_strerror(res));
+
+    /* always cleanup */
+    curl_easy_cleanup(curl);
+  }
+  return 0;
+}

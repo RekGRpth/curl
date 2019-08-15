@@ -52,7 +52,7 @@ Build nghttp3
 Build ngtcp2
 
      % cd ..
-     % git clone -b draft-20 https://github.com/ngtcp2/ngtcp2
+     % git clone -b draft-22 https://github.com/ngtcp2/ngtcp2
      % cd ngtcp2
      % autoreconf -i
      % ./configure PKG_CONFIG_PATH=<somewhere1>/lib/pkgconfig:<somewhere2>/lib/pkgconfig LDFLAGS="-Wl,-rpath,<somehere1>/lib" --prefix==<somewhere3>
@@ -83,12 +83,8 @@ you'll just get ld.so linker errors.
 
 Clone quiche and BoringSSL:
 
-     % git clone https://github.com/cloudflare/quiche
-     % cd quiche/
-     % mkdir deps
-     % cd deps
-     % git clone https://github.com/google/boringssl
-     % cd boringssl
+     % git clone --recursive https://github.com/cloudflare/quiche
+     % cd quiche/deps/boringssl
 
 Build BoringSSL (it needs to be built manually so it can be reused with curl):
 

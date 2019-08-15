@@ -1,5 +1,3 @@
-#ifndef HEADER_CURL_QUIC_H
-#define HEADER_CURL_QUIC_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -21,30 +19,38 @@
  * KIND, either express or implied.
  *
  ***************************************************************************/
+/* <DESC>
+ * HTTP with Alt-Svc support
+ * </DESC>
+ */
+#include <stdio.h>
+#include <curl/curl.h>
 
-#include "curl_setup.h"
+int main(void)
+{
+  CURL *curl;
+  CURLcode res;
 
-#ifdef ENABLE_QUIC
-#ifdef USE_NGTCP2
-#include "vquic/ngtcp2.h"
-#endif
-#ifdef USE_QUICHE
-#include "vquic/quiche.h"
-#endif
+  curl = curl_easy_init();
+  if(curl) {
+    curl_easy_setopt(curl, CURLOPT_URL, "https://example.com");
 
-#include "urldata.h"
+    /* cache the alternatives in this file */
+    curl_easy_setopt(curl, CURLOPT_ALTSVC, "altsvc.txt");
 
-/* functions provided by the specific backends */
-CURLcode Curl_quic_connect(struct connectdata *conn,
-                           curl_socket_t sockfd,
-                           int sockindex,
-                           const struct sockaddr *addr,
-                           socklen_t addrlen);
-CURLcode Curl_quic_is_connected(struct connectdata *conn,
-                                curl_socket_t sockfd,
-                                bool *connected);
-int Curl_quic_ver(char *p, size_t len);
+    /* restrict which HTTP versions to use alternatives */
+    curl_easy_setopt(curl, CURLOPT_ALTSVC_CTRL, (long)
+                     CURLALTSVC_H1|CURLALTSVC_H2|CURLALTSVC_H3);
 
-#endif
+    /* Perform the request, res will get the return code */
+    res = curl_easy_perform(curl);
+    /* Check for errors */
+    if(res != CURLE_OK)
+      fprintf(stderr, "curl_easy_perform() failed: %s\n",
+              curl_easy_strerror(res));
 
-#endif /* HEADER_CURL_QUIC_H */
+    /* always cleanup */
+    curl_easy_cleanup(curl);
+  }
+  return 0;
+}

@@ -1,5 +1,3 @@
-#ifndef HEADER_CURL_QUIC_H
-#define HEADER_CURL_QUIC_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -21,30 +19,29 @@
  * KIND, either express or implied.
  *
  ***************************************************************************/
+/* <DESC>
+ * Checks if HTTP/3 support is present in libcurl.
+ * </DESC>
+ */
+#include <stdio.h>
+#include <curl/curl.h>
 
-#include "curl_setup.h"
+int main(void)
+{
+  curl_version_info_data *ver;
 
-#ifdef ENABLE_QUIC
-#ifdef USE_NGTCP2
-#include "vquic/ngtcp2.h"
-#endif
-#ifdef USE_QUICHE
-#include "vquic/quiche.h"
-#endif
+  curl_global_init(CURL_GLOBAL_ALL);
 
-#include "urldata.h"
+  ver = curl_version_info(CURLVERSION_NOW);
+  if(ver->features & CURL_VERSION_HTTP2)
+    printf("HTTP/2 support is present\n");
 
-/* functions provided by the specific backends */
-CURLcode Curl_quic_connect(struct connectdata *conn,
-                           curl_socket_t sockfd,
-                           int sockindex,
-                           const struct sockaddr *addr,
-                           socklen_t addrlen);
-CURLcode Curl_quic_is_connected(struct connectdata *conn,
-                                curl_socket_t sockfd,
-                                bool *connected);
-int Curl_quic_ver(char *p, size_t len);
+  if(ver->features & CURL_VERSION_HTTP3)
+    printf("HTTP/3 support is present\n");
 
-#endif
+  if(ver->features & CURL_VERSION_ALTSVC)
+    printf("Alt-svc support is present\n");
 
-#endif /* HEADER_CURL_QUIC_H */
+  curl_global_cleanup();
+  return 0;
+}
