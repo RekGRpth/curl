@@ -101,6 +101,20 @@ matrix:
           compiler: gcc
           dist: xenial
           env:
+              - T=novalgrind BORINGSSL=yes QUICHE="yes" C="--with-ssl=$HOME/boringssl --with-quiche=$home/quiche --enable-alt-svc" LD_LIBRARY_PATH=/home/travis/boringssl/lib:/usr/local/lib
+              - OVERRIDE_CC="CC=gcc-8" OVERRIDE_CXX="CXX=g++-8"
+          addons:
+              apt:
+                  sources:
+                      - *common_sources
+                  packages:
+                      - *common_packages
+                      - libpsl-dev
+                      - libbrotli-dev
+        - os: linux
+          compiler: gcc
+          dist: xenial
+          env:
               - T=debug-wolfssl C="--with-wolfssl --without-ssl"
               - OVERRIDE_CC="CC=gcc-8" OVERRIDE_CXX="CXX=g++-8"
           addons:
@@ -405,10 +419,23 @@ before_script:
         cd .. &&
         mkdir lib &&
         cd lib &&
-        ln -s ../build/crypto/libcrypto.so . &&
-        ln -s ../build/ssl/libssl.so . &&
+        cp ../build/crypto/libcrypto.so . &&
+        cp ../build/ssl/libssl.so . &&
         echo "BoringSSL lib dir: "`pwd` &&
+        cd ../build &&
+        make clean && rm -f CMakeCache.txt &&
+        CXX="g++" CC="gcc" cmake -DCMAKE_POSITION_INDEPENDENT_CODE=on .. &&
+        make &&
         export LIBS=-lpthread )
+      fi
+    - |
+      if [ "$TRAVIS_OS_NAME" = linux -a "$QUICHE" ]; then
+        (cd $HOME &&
+        git clone --depth=1 https://github.com/cloudflare/quiche.git &&
+        curl https://sh.rustup.rs -sSf | sh -s -- -y &&
+        source $HOME/.cargo/env &&
+        cd quiche &&
+        QUICHE_BSSL_PATH=$HOME/boringssl cargo build -v --release)
       fi
     - |
       if [ $TRAVIS_OS_NAME = linux ]; then
@@ -463,7 +490,7 @@ script:
              make
              make TFLAGS=-n test-nonflaky
              make "TFLAGS=-n -e" test-nonflaky
-             tests="1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 200 201 202 300 301 302 500 501 502 503 504 506 507 508 509 510 511 512 513 514 515 516 517 518 519 700 701 702 800 801 802 803 900 901 902 903 1000 1001 1002 1004 1100 1101 1200 1201 1302 1303 1304 1305 1306 1308 1400 1401 1402 1404 1450 1451 1452 1502 1507 1508 1600 1602 1603 1605 1650 1651 1652 1653 1654 2001 2100 3000"
+             tests="1 200 300 500 700 800 900 1000 1100 1200 1302 1400 1502 3000"
              make "TFLAGS=-n -t $tests" test-nonflaky
              coveralls --gcov /usr/bin/gcov-8 --gcov-options '\-lp' -i src -e lib -e tests -e docs -b $PWD/src
              coveralls --gcov /usr/bin/gcov-8 --gcov-options '\-lp' -e src -i lib -e tests -e docs -b $PWD/lib

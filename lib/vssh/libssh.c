@@ -3013,5 +3013,23 @@ static void sftp_quote_stat(struct connectdata *conn)
   return;
 }
 
+CURLcode Curl_ssh_init(void)
+{
+  if(ssh_init()) {
+    DEBUGF(fprintf(stderr, "Error: libssh_init failed\n"));
+    return CURLE_FAILED_INIT;
+  }
+  return CURLE_OK;
+}
+
+void Curl_ssh_cleanup(void)
+{
+  (void)ssh_finalize();
+}
+
+size_t Curl_ssh_version(char *buffer, size_t buflen)
+{
+  return msnprintf(buffer, buflen, "libssh/%s", CURL_LIBSSH_VERSION);
+}
 
 #endif                          /* USE_LIBSSH */

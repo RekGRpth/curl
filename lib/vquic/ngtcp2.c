@@ -859,8 +859,9 @@ static int cb_recv_stream_data(ngtcp2_conn *tconn, int64_t stream_id,
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
-  ngtcp2_conn_extend_max_stream_offset(tconn, stream_id, buflen);
-  ngtcp2_conn_extend_max_offset(tconn, buflen);
+  ngtcp2_conn_extend_max_stream_offset(tconn, stream_id, nconsumed);
+  ngtcp2_conn_extend_max_offset(tconn, nconsumed);
+
   return 0;
 }
 
@@ -938,7 +939,6 @@ static int cb_recv_retry(ngtcp2_conn *tconn, const ngtcp2_pkt_hd *hd,
   (void)hd;
   (void)retry;
 
-  quic_init_ssl(qs);
   setup_initial_crypto_context(qs);
 
   return 0;
@@ -1029,35 +1029,38 @@ static int cb_get_new_connection_id(ngtcp2_conn *tconn, ngtcp2_cid *cid,
   return 0;
 }
 
-static void quic_callbacks(ngtcp2_conn_callbacks *c)
-{
-  memset(c, 0, sizeof(ngtcp2_conn_callbacks));
-  c->client_initial = cb_initial;
-  /* recv_client_initial = NULL */
-  c->recv_crypto_data = cb_recv_crypto_data;
-  c->handshake_completed = cb_handshake_completed;
-  /* recv_version_negotiation = NULL */
-  c->in_encrypt = cb_in_encrypt;
-  c->in_decrypt = cb_in_decrypt;
-  c->encrypt = cb_encrypt_data;
-  c->decrypt = cb_decrypt_data;
-  c->in_hp_mask = cb_in_hp_mask;
-  c->hp_mask = cb_hp_mask;
-  c->recv_stream_data = cb_recv_stream_data;
-  /* c->acked_crypto_offset = cb_acked_crypto_offset; */
-  c->acked_stream_data_offset = cb_acked_stream_data_offset;
-  /* stream_open = NULL */
-  c->stream_close = cb_stream_close;
-  c->stream_reset = cb_stream_reset;
-  /* recv_stateless_reset = NULL */
-  c->recv_retry = cb_recv_retry;
-  c->extend_max_local_streams_bidi = cb_extend_max_local_streams_bidi;
-  /* extend_max_local_streams_uni = NULL */
-  c->extend_max_stream_data = cb_extend_max_stream_data;
-  /* rand = NULL */
-  c->get_new_connection_id = cb_get_new_connection_id;
-  /* remove_connection_id = NULL */
-}
+static ngtcp2_conn_callbacks ng_callbacks = {
+  cb_initial,
+  NULL, /* recv_client_initial */
+  cb_recv_crypto_data,
+  cb_handshake_completed,
+  NULL, /* recv_version_negotiation */
+  cb_in_encrypt,
+  cb_in_decrypt,
+  cb_encrypt_data,
+  cb_decrypt_data,
+  cb_in_hp_mask,
+  cb_hp_mask,
+  cb_recv_stream_data,
+  NULL, /* acked_crypto_offset */
+  cb_acked_stream_data_offset,
+  NULL, /* stream_open */
+  cb_stream_close,
+  NULL, /* recv_stateless_reset */
+  cb_recv_retry,
+  cb_extend_max_local_streams_bidi,
+  NULL, /* extend_max_local_streams_uni */
+  NULL, /* rand  */
+  cb_get_new_connection_id,
+  NULL, /* remove_connection_id */
+  NULL, /* update_key */
+  NULL, /* path_validation */
+  NULL, /* select_preferred_addr */
+  cb_stream_reset,
+  NULL, /* extend_max_remote_streams_bidi */
+  NULL, /* extend_max_remote_streams_uni */
+  cb_extend_max_stream_data,
+};
 
 /*
  * Might be called twice for happy eyeballs.
@@ -1110,7 +1113,6 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
     return result;
 
   quic_settings(&qs->settings);
-  quic_callbacks(&qs->callbacks);
 
   qs->tx_crypto_level = NGTCP2_CRYPTO_LEVEL_INITIAL;
   qs->rx_crypto_level = NGTCP2_CRYPTO_LEVEL_INITIAL;
@@ -1131,7 +1133,7 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
 #error "unsupported ngtcp2 version"
 #endif
   rc = ngtcp2_conn_client_new(&qs->qconn, &qs->dcid, &qs->scid, &path, QUICVER,
-                              &qs->callbacks, &qs->settings, NULL, qs);
+                              &ng_callbacks, &qs->settings, NULL, qs);
   if(rc)
     return CURLE_FAILED_INIT; /* TODO: create a QUIC error code */
 
@@ -1217,12 +1219,16 @@ static int cb_h3_stream_close(nghttp3_conn *conn, int64_t stream_id,
                               uint64_t app_error_code, void *user_data,
                               void *stream_user_data)
 {
+  struct Curl_easy *data = stream_user_data;
+  struct HTTP *stream = data->req.protop;
   (void)conn;
   (void)stream_id;
   (void)app_error_code;
   (void)user_data;
-  (void)stream_user_data;
   fprintf(stderr, "cb_h3_stream_close CALLED\n");
+
+  stream->closed = TRUE;
+
   return 0;
 }
 
@@ -1230,12 +1236,11 @@ static int cb_h3_recv_data(nghttp3_conn *conn, int64_t stream_id,
                            const uint8_t *buf, size_t buflen,
                            void *user_data, void *stream_user_data)
 {
+  struct quicsocket *qs = user_data;
   size_t ncopy;
   struct Curl_easy *data = stream_user_data;
   struct HTTP *stream = data->req.protop;
   (void)conn;
-  (void)stream_id;
-  (void)user_data;
   fprintf(stderr, "cb_h3_recv_data CALLED with %d bytes\n", buflen);
 
   /* TODO: this needs to be handled properly */
@@ -1247,6 +1252,9 @@ static int cb_h3_recv_data(nghttp3_conn *conn, int64_t stream_id,
   stream->memlen += ncopy;
   stream->mem += ncopy;
 
+  ngtcp2_conn_extend_max_stream_offset(qs->qconn, stream_id, buflen);
+  ngtcp2_conn_extend_max_offset(qs->qconn, buflen);
+
   return 0;
 }
 
@@ -1254,12 +1262,14 @@ static int cb_h3_deferred_consume(nghttp3_conn *conn, int64_t stream_id,
                                   size_t consumed, void *user_data,
                                   void *stream_user_data)
 {
+  struct quicsocket *qs = user_data;
   (void)conn;
-  (void)stream_id;
-  (void)consumed;
-  (void)user_data;
   (void)stream_user_data;
   fprintf(stderr, "cb_h3_deferred_consume CALLED\n");
+
+  ngtcp2_conn_extend_max_stream_offset(qs->qconn, stream_id, consumed);
+  ngtcp2_conn_extend_max_offset(qs->qconn, consumed);
+
   return 0;
 }
 
@@ -1395,7 +1405,7 @@ static int init_ngh3_conn(struct quicsocket *qs)
                                &ngh3_callbacks,
                                &qs->h3settings,
                                nghttp3_mem_default(),
-                               qs->conn->data);
+                               qs);
   if(rc) {
     result = CURLE_OUT_OF_MEMORY;
     goto fail;
@@ -1475,6 +1485,11 @@ static ssize_t ngh3_stream_recv(struct connectdata *conn,
     infof(conn->data, "ngh3_stream_recv returns %zd bytes\n",
           stream->memlen);
     return stream->memlen;
+  }
+
+  if(stream->closed) {
+    *curlcode = CURLE_OK;
+    return 0;
   }
 
   infof(conn->data, "ngh3_stream_recv returns 0 bytes and EAGAIN\n");
@@ -1930,6 +1945,15 @@ static CURLcode ng_flush_egress(struct connectdata *conn, int sockfd,
           else {
             failf(conn->data, "ngtcp2_conn_writev_stream returned error: %s\n",
                   ngtcp2_strerror((int)outlen));
+            return CURLE_SEND_ERROR;
+          }
+        }
+        else if(ndatalen > 0) {
+          rv = nghttp3_conn_add_write_offset(qs->h3conn, stream_id, ndatalen);
+          if(rv != 0) {
+            failf(conn->data,
+                  "nghttp3_conn_add_write_offset returned error: %s\n",
+                  nghttp3_strerror(rv));
             return CURLE_SEND_ERROR;
           }
         }
