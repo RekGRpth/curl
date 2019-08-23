@@ -4,7 +4,7 @@ cache:
     directories:
         - $HOME/wolfssl-4.0.0-stable
         - $HOME/mesalink-1.0.0
-        - $HOME/nghttp2-1.34.0
+        - $HOME/nghttp2-1.39.2
 
 env:
     global:
@@ -101,7 +101,21 @@ matrix:
           compiler: gcc
           dist: xenial
           env:
-              - T=novalgrind BORINGSSL=yes QUICHE="yes" C="--with-ssl=$HOME/boringssl --with-quiche=$home/quiche --enable-alt-svc" LD_LIBRARY_PATH=/home/travis/boringssl/lib:/usr/local/lib
+              - T=novalgrind BORINGSSL=yes QUICHE="yes" C="--with-ssl=$HOME/boringssl --with-quiche=$HOME/quiche/target/release --enable-alt-svc" LD_LIBRARY_PATH=/home/travis/boringssl/lib:$HOME/quiche/target/release:/usr/local/lib
+              - OVERRIDE_CC="CC=gcc-8" OVERRIDE_CXX="CXX=g++-8"
+          addons:
+              apt:
+                  sources:
+                      - *common_sources
+                  packages:
+                      - *common_packages
+                      - libpsl-dev
+                      - libbrotli-dev
+        - os: linux
+          compiler: gcc
+          dist: xenial
+          env:
+              - T=novalgrind NGTCP2=yes C="--with-ssl=$HOME/ngbuild --with-ngtcp2=$HOME/ngbuild --with-nghttp3=$HOME/ngbuild --enable-alt-svc" NOTESTS=
               - OVERRIDE_CC="CC=gcc-8" OVERRIDE_CXX="CXX=g++-8"
           addons:
               apt:
@@ -408,6 +422,28 @@ install:
 before_script:
     - ./buildconf
     - |
+      if [ "$NGTCP2" = yes ]; then
+       (cd $HOME &&
+       git clone --depth 1 -b quic-draft-22 https://github.com/tatsuhiro-t/openssl possl &&
+       cd possl &&
+       ./config enable-tls1_3 --prefix=$HOME/ngbuild &&
+       make && make install_sw &&
+
+       cd .. &&
+       git clone --depth 1 https://github.com/ngtcp2/nghttp3
+       cd nghttp3 &&
+       autoreconf -i &&
+       ./configure --prefix=$HOME/ngbuild --enable-lib-only &&
+       make && make install &&
+
+       cd .. &&
+       git clone --depth 1 -b draft-22 https://github.com/ngtcp2/ngtcp2 &&
+       cd ngtcp2 &&
+       autoreconf -i &&
+       ./configure PKG_CONFIG_PATH=$HOME/ngbuild/lib/pkgconfig LDFLAGS="-Wl,-rpath,$HOME/ngbuild/lib" --prefix=$HOME/ngbuild &&
+       make && make install)
+      fi
+    - |
       if [ "$TRAVIS_OS_NAME" = linux -a "$BORINGSSL" ]; then
         (cd $HOME &&
         git clone --depth=1 https://boringssl.googlesource.com/boringssl &&
@@ -435,7 +471,7 @@ before_script:
         curl https://sh.rustup.rs -sSf | sh -s -- -y &&
         source $HOME/.cargo/env &&
         cd quiche &&
-        QUICHE_BSSL_PATH=$HOME/boringssl cargo build -v --release)
+        QUICHE_BSSL_PATH=$HOME/boringssl cargo build -v --release --features pkg-config-meta)
       fi
     - |
       if [ $TRAVIS_OS_NAME = linux ]; then
@@ -466,11 +502,11 @@ before_script:
       fi
     - |
       if [ $TRAVIS_OS_NAME = linux ]; then
-        if [ ! -e $HOME/nghttp2-1.34.0/Makefile ]; then
+        if [ ! -e $HOME/nghttp2-1.39.2/Makefile ]; then
           (cd $HOME && \
-          curl -L https://github.com/nghttp2/nghttp2/releases/download/v1.34.0/nghttp2-1.34.0.tar.gz |
+          curl -L https://github.com/nghttp2/nghttp2/releases/download/v1.39.2/nghttp2-1.39.2.tar.gz |
           tar xzf - && \
-          cd nghttp2-1.34.0 && \
+          cd nghttp2-1.39.2 && \
           CXX="g++-8" CC="gcc-8" CFLAGS="" LDFLAGS="" LIBS="" ./configure --disable-threads --enable-app && \
           make)
         fi
@@ -479,7 +515,7 @@ before_script:
       if [ $TRAVIS_OS_NAME = linux ]; then
         (cd $HOME/wolfssl-4.0.0-stable && sudo make install)
         (cd $HOME/mesalink-1.0.0 && sudo make install)
-        (cd $HOME/nghttp2-1.34.0 && sudo make install)
+        (cd $HOME/nghttp2-1.39.2 && sudo make install)
       fi
 
 script:
@@ -521,7 +557,7 @@ script:
     - |
         set -eo pipefail
         if [ "$T" = "novalgrind" ]; then
-             ./configure $C
+             ./configure --enable-werror $C
              make && make examples
              make TFLAGS=-n test-nonflaky
         fi

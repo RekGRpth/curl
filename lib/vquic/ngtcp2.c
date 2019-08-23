@@ -315,6 +315,7 @@ static void set_tls_alert(struct quicsocket *qs, uint8_t alert)
 {
   qs->tls_alert = alert;
 }
+static int init_ngh3_conn(struct quicsocket *qs);
 
 static int ssl_on_key(struct quicsocket *qs,
                       int name, const uint8_t *secret, size_t secretlen)
@@ -395,6 +396,10 @@ static int ssl_on_key(struct quicsocket *qs,
     ngtcp2_conn_install_rx_keys(qs->qconn, key, keylen, iv, ivlen,
                                 hp, hplen);
     qs->rx_crypto_level = NGTCP2_CRYPTO_LEVEL_APP;
+    if(init_ngh3_conn(qs) != CURLE_OK) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
     break;
   }
   return 0;
@@ -746,18 +751,12 @@ cb_recv_crypto_data(ngtcp2_conn *tconn, ngtcp2_crypto_level crypto_level,
   return quic_read_tls(qs);
 }
 
-static int init_ngh3_conn(struct quicsocket *qs);
-
 static int cb_handshake_completed(ngtcp2_conn *tconn, void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
   (void)tconn;
   qs->tx_crypto_level = NGTCP2_CRYPTO_LEVEL_APP;
   infof(qs->conn->data, "QUIC handshake is completed\n");
-
-  if(init_ngh3_conn(qs) != CURLE_OK) {
-    return NGTCP2_ERR_CALLBACK_FAILURE;
-  }
 
   return 0;
 }
@@ -1150,8 +1149,9 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
  */
 int Curl_quic_ver(char *p, size_t len)
 {
+  ngtcp2_info *ng2 = ngtcp2_version(0);
   return msnprintf(p, len, " ngtcp2/%s nghttp3/%s",
-                   NGTCP2_VERSION, NGHTTP3_VERSION);
+                   ng2->version_str, NGHTTP3_VERSION);
 }
 
 static int ng_getsock(struct connectdata *conn, curl_socket_t *socks)
@@ -1497,6 +1497,28 @@ static ssize_t ngh3_stream_recv(struct connectdata *conn,
   return -1;
 }
 
+static int cb_h3_readfunction(nghttp3_conn *conn, int64_t stream_id,
+                              const uint8_t **pdata,
+                              size_t *pdatalen, uint32_t *pflags,
+                              void *user_data, void *stream_user_data)
+{
+  struct Curl_easy *data = stream_user_data;
+  (void)conn;
+  (void)stream_id;
+  (void)user_data;
+
+  fprintf(stderr, "called cb_h3_readfunction\n");
+
+  if(data->set.postfields) {
+    *pdata = data->set.postfields;
+    *pdatalen = data->state.infilesize;
+    *pflags = NGHTTP3_DATA_FLAG_EOF;
+    return 0;
+  }
+
+  return 0;
+}
+
 /* Index where :authority header field will appear in request header
    field list. */
 #define AUTHORITY_DST_IDX 3
@@ -1690,28 +1712,25 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
   case HTTPREQ_POST:
   case HTTPREQ_POST_FORM:
   case HTTPREQ_POST_MIME:
-  case HTTPREQ_PUT:
+  case HTTPREQ_PUT: {
+    nghttp3_data_reader data_reader;
     if(data->state.infilesize != -1)
       stream->upload_left = data->state.infilesize;
     else
       /* data sending without specifying the data amount up front */
       stream->upload_left = -1; /* unknown, but not zero */
 
-#if 0
-    stream3_id = quiche_h3_send_request(qs->h3c, qs->conn, nva, nheader,
-                                        stream->upload_left ? FALSE: TRUE);
-    if((stream3_id >= 0) && data->set.postfields) {
-      ssize_t sent = quiche_h3_send_body(qs->h3c, qs->conn, stream3_id,
-                                         (uint8_t *)data->set.postfields,
-                                         stream->upload_left, TRUE);
-      if(sent <= 0) {
-        failf(data, "quiche_h3_send_body failed!");
-        result = CURLE_SEND_ERROR;
-      }
-      stream->upload_left = 0; /* nothing left to send */
+    data_reader.read_data = cb_h3_readfunction;
+
+    rc = nghttp3_conn_submit_request(qs->h3conn, stream->stream3_id,
+                                     nva, nheader, &data_reader,
+                                     conn->data);
+    if(rc) {
+      result = CURLE_SEND_ERROR;
+      goto fail;
     }
-#endif
     break;
+  }
   default:
     stream->upload_left = 0; /* nothing left to send */
     rc = nghttp3_conn_submit_request(qs->h3conn, stream->stream3_id,
