@@ -50,6 +50,20 @@
 #define H3BUGF(x) do { } WHILE_FALSE
 #endif
 
+/*
+ * This holds outgoing HTTP/3 stream data that is used by nghttp3 until acked.
+ * It is used as a circular buffer. Add new bytes at the end until it reaches
+ * the far end, then start over at index 0 again.
+ */
+
+#define H3_SEND_SIZE (20*1024)
+struct h3out {
+  uint8_t buf[H3_SEND_SIZE];
+  size_t used;   /* number of bytes used in the buffer */
+  size_t windex; /* index in the buffer where to start writing the next
+                    data block */
+};
+
 #define QUIC_MAX_STREAMS (256*1024)
 #define QUIC_MAX_DATA (1*1024*1024)
 #define QUIC_IDLE_TIMEOUT 60000 /* milliseconds */
@@ -63,6 +77,9 @@ static CURLcode ng_process_ingress(struct connectdata *conn,
                                    struct quicsocket *qs);
 static CURLcode ng_flush_egress(struct connectdata *conn, int sockfd,
                                 struct quicsocket *qs);
+static int cb_h3_acked_stream_data(nghttp3_conn *conn, int64_t stream_id,
+                                   size_t datalen, void *user_data,
+                                   void *stream_user_data);
 
 static ngtcp2_tstamp timestamp(void)
 {
@@ -268,9 +285,19 @@ static int transport_params_parse_cb(SSL *ssl, unsigned int ext_type,
   return 1;
 }
 
+static FILE *keylog_file; /* not thread-safe */
+static void keylog_callback(const SSL *ssl, const char *line)
+{
+  (void)ssl;
+  fputs(line, keylog_file);
+  fputc('\n', keylog_file);
+  fflush(keylog_file);
+}
+
 static SSL_CTX *quic_ssl_ctx(struct Curl_easy *data)
 {
   SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_method());
+  const char *keylog_filename;
 
   SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_3_VERSION);
   SSL_CTX_set_max_proto_version(ssl_ctx, TLS1_3_VERSION);
@@ -304,6 +331,14 @@ static SSL_CTX *quic_ssl_ctx(struct Curl_easy *data)
           "PARAMETERS) failed: %s\n",
           ERR_error_string(ERR_get_error(), NULL));
     return NULL;
+  }
+
+  keylog_filename = getenv("SSLKEYLOGFILE");
+  if(keylog_filename) {
+    keylog_file = fopen(keylog_filename, "wb");
+    if(keylog_file) {
+      SSL_CTX_set_keylog_callback(ssl_ctx, keylog_callback);
+    }
   }
 
   return ssl_ctx;
@@ -761,19 +796,16 @@ static int cb_handshake_completed(ngtcp2_conn *tconn, void *user_data)
   return 0;
 }
 
-static ssize_t cb_in_encrypt(ngtcp2_conn *tconn,
-                             uint8_t *dest, size_t destlen,
-                             const uint8_t *plaintext,
-                             size_t plaintextlen,
-                             const uint8_t *key, size_t keylen,
-                             const uint8_t *nonce, size_t noncelen,
-                             const uint8_t *ad, size_t adlen,
-                             void *user_data)
+static int cb_in_encrypt(ngtcp2_conn *tconn, uint8_t *dest,
+                         const uint8_t *plaintext, size_t plaintextlen,
+                         const uint8_t *key, const uint8_t *nonce,
+                         size_t noncelen, const uint8_t *ad, size_t adlen,
+                         void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
-  ssize_t nwrite = Curl_qc_encrypt(dest, destlen, plaintext, plaintextlen,
-                                   &qs->hs_crypto_ctx,
-                                   key, keylen, nonce, noncelen, ad, adlen);
+  int nwrite = Curl_qc_encrypt(dest, plaintext, plaintextlen,
+                               &qs->hs_crypto_ctx,
+                               key, nonce, noncelen, ad, adlen);
   if(nwrite < 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
@@ -782,56 +814,51 @@ static ssize_t cb_in_encrypt(ngtcp2_conn *tconn,
   return nwrite;
 }
 
-static ssize_t cb_in_decrypt(ngtcp2_conn *tconn,
-                             uint8_t *dest, size_t destlen,
-                             const uint8_t *ciphertext, size_t ciphertextlen,
-                             const uint8_t *key, size_t keylen,
-                             const uint8_t *nonce, size_t noncelen,
-                             const uint8_t *ad, size_t adlen,
-                             void *user_data)
+static int cb_in_decrypt(ngtcp2_conn *tconn, uint8_t *dest,
+                         const uint8_t *ciphertext, size_t ciphertextlen,
+                         const uint8_t *key, const uint8_t *nonce,
+                         size_t noncelen, const uint8_t *ad, size_t adlen,
+                         void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
   (void)tconn;
-  return Curl_qc_decrypt(dest, destlen, ciphertext, ciphertextlen,
-                         &qs->hs_crypto_ctx, key, keylen,
+  return Curl_qc_decrypt(dest, ciphertext, ciphertextlen,
+                         &qs->hs_crypto_ctx, key,
                          nonce, noncelen, ad, adlen);
 }
 
 
-static ssize_t cb_encrypt_data(ngtcp2_conn *tconn,
-                               uint8_t *dest, size_t destlen,
-                               const uint8_t *plaintext, size_t plaintextlen,
-                               const uint8_t *key, size_t keylen,
-                               const uint8_t *nonce, size_t noncelen,
-                               const uint8_t *ad, size_t adlen,
-                               void *user_data)
+static int cb_encrypt_data(ngtcp2_conn *tconn,
+                           uint8_t *dest,
+                           const uint8_t *plaintext, size_t plaintextlen,
+                           const uint8_t *key,
+                           const uint8_t *nonce, size_t noncelen,
+                           const uint8_t *ad, size_t adlen,
+                           void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
-  ssize_t rc;
+  int rc;
   (void)tconn;
-  rc = Curl_qc_encrypt(dest, destlen, plaintext, plaintextlen,
+  rc = Curl_qc_encrypt(dest, plaintext, plaintextlen,
                        &qs->crypto_ctx,
-                       key, keylen, nonce, noncelen, ad, adlen);
+                       key, nonce, noncelen, ad, adlen);
   if(rc < 0)
     return NGTCP2_ERR_CALLBACK_FAILURE;
   return rc;
 }
 
-static ssize_t
-cb_decrypt_data(ngtcp2_conn *tconn,
-                uint8_t *dest, size_t destlen,
-                const uint8_t *ciphertext, size_t ciphertextlen,
-                const uint8_t *key, size_t keylen,
-                const uint8_t *nonce, size_t noncelen,
-                const uint8_t *ad, size_t adlen,
-                void *user_data)
+static int cb_decrypt_data(ngtcp2_conn *tconn, uint8_t *dest,
+                           const uint8_t *ciphertext, size_t ciphertextlen,
+                           const uint8_t *key,
+                           const uint8_t *nonce, size_t noncelen,
+                           const uint8_t *ad, size_t adlen,
+                           void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
-  ssize_t rc;
+  int rc;
   (void)tconn;
-  rc = Curl_qc_decrypt(dest, destlen, ciphertext, ciphertextlen,
-                       &qs->crypto_ctx,
-                       key, keylen, nonce, noncelen, ad, adlen);
+  rc = Curl_qc_decrypt(dest, ciphertext, ciphertextlen,
+                       &qs->crypto_ctx, key, nonce, noncelen, ad, adlen);
   if(rc < 0)
     return NGTCP2_ERR_TLS_DECRYPT;
   return rc;
@@ -943,34 +970,30 @@ static int cb_recv_retry(ngtcp2_conn *tconn, const ngtcp2_pkt_hd *hd,
   return 0;
 }
 
-static ssize_t cb_in_hp_mask(ngtcp2_conn *tconn, uint8_t *dest, size_t destlen,
-                             const uint8_t *key, size_t keylen,
-                             const uint8_t *sample, size_t samplelen,
-                             void *user_data)
+static int cb_in_hp_mask(ngtcp2_conn *tconn, uint8_t *dest,
+                         const uint8_t *key, const uint8_t *sample,
+                         void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
-  ssize_t nwrite;
+  int nwrite;
   (void)tconn;
 
-  nwrite = Curl_qc_hp_mask(dest, destlen, &qs->hs_crypto_ctx,
-                           key, keylen, sample, samplelen);
+  nwrite = Curl_qc_hp_mask(dest, &qs->hs_crypto_ctx, key, sample);
   if(nwrite < 0)
     return NGTCP2_ERR_CALLBACK_FAILURE;
 
   return nwrite;
 }
 
-static ssize_t cb_hp_mask(ngtcp2_conn *tconn, uint8_t *dest, size_t destlen,
-                          const uint8_t *key, size_t keylen,
-                          const uint8_t *sample, size_t samplelen,
-                          void *user_data)
+static int cb_hp_mask(ngtcp2_conn *tconn, uint8_t *dest,
+                      const uint8_t *key, const uint8_t *sample,
+                      void *user_data)
 {
   struct quicsocket *qs = (struct quicsocket *)user_data;
-  ssize_t nwrite;
+  int nwrite;
   (void)tconn;
 
-  nwrite = Curl_qc_hp_mask(dest, destlen, &qs->crypto_ctx,
-                           key, keylen, sample, samplelen);
+  nwrite = Curl_qc_hp_mask(dest, &qs->crypto_ctx, key, sample);
   if(nwrite < 0)
     return NGTCP2_ERR_CALLBACK_FAILURE;
 
@@ -1150,8 +1173,9 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
 int Curl_quic_ver(char *p, size_t len)
 {
   ngtcp2_info *ng2 = ngtcp2_version(0);
+  nghttp3_info *ht3 = nghttp3_version(0);
   return msnprintf(p, len, " ngtcp2/%s nghttp3/%s",
-                   ng2->version_str, NGHTTP3_VERSION);
+                   ng2->version_str, ht3->version_str);
 }
 
 static int ng_getsock(struct connectdata *conn, curl_socket_t *socks)
@@ -1194,7 +1218,7 @@ static unsigned int ng_conncheck(struct connectdata *conn,
   return CONNRESULT_NONE;
 }
 
-static const struct Curl_handler Curl_handler_h3_quiche = {
+static const struct Curl_handler Curl_handler_http3 = {
   "HTTPS",                              /* scheme */
   ZERO_NULL,                            /* setup_connection */
   Curl_http,                            /* do_it */
@@ -1250,6 +1274,16 @@ static int cb_h3_recv_data(nghttp3_conn *conn, int64_t stream_id,
   memcpy(stream->mem, buf, ncopy);
   stream->len -= ncopy;
   stream->memlen += ncopy;
+#if 0 /* extra debugging of incoming h3 data */
+  fprintf(stderr, "!! Copies %zd bytes to %p (total %zd)\n",
+          ncopy, stream->mem, stream->memlen);
+  {
+    size_t i;
+    for(i = 0; i < ncopy; i++) {
+      fprintf(stderr, "!! data[%d]: %02x '%c'\n", i, buf[i], buf[i]);
+    }
+  }
+#endif
   stream->mem += ncopy;
 
   ngtcp2_conn_extend_max_stream_offset(qs->qconn, stream_id, buflen);
@@ -1370,7 +1404,7 @@ static int cb_h3_send_stop_sending(nghttp3_conn *conn, int64_t stream_id,
 }
 
 static nghttp3_conn_callbacks ngh3_callbacks = {
-  NULL, /* acked_stream_data */
+  cb_h3_acked_stream_data, /* acked_stream_data */
   cb_h3_stream_close,
   cb_h3_recv_data,
   cb_h3_deferred_consume,
@@ -1386,6 +1420,7 @@ static nghttp3_conn_callbacks ngh3_callbacks = {
   NULL, /* http_cancel_push */
   cb_h3_send_stop_sending,
   NULL, /* push_stream */
+  NULL, /* end_stream */
 };
 
 static int init_ngh3_conn(struct quicsocket *qs)
@@ -1451,6 +1486,7 @@ static int init_ngh3_conn(struct quicsocket *qs)
 static Curl_recv ngh3_stream_recv;
 static Curl_send ngh3_stream_send;
 
+/* incoming data frames on the h3 stream */
 static ssize_t ngh3_stream_recv(struct connectdata *conn,
                                 int sockindex,
                                 char *buf,
@@ -1464,11 +1500,13 @@ static ssize_t ngh3_stream_recv(struct connectdata *conn,
   fprintf(stderr, "ngh3_stream_recv CALLED (easy %p, socket %d)\n",
           conn->data, sockfd);
 
-  /* remember where to store incoming data for this stream and how big the
-     buffer is */
-  stream->mem = buf;
-  stream->len = buffersize;
-  stream->memlen = 0;
+  if(!stream->memlen) {
+    /* remember where to store incoming data for this stream and how big the
+       buffer is */
+    stream->mem = buf;
+    stream->len = buffersize;
+  }
+  /* else, there's data in the buffer already */
 
   if(ng_process_ingress(conn, sockfd, qs)) {
     *curlcode = CURLE_RECV_ERROR;
@@ -1480,11 +1518,16 @@ static ssize_t ngh3_stream_recv(struct connectdata *conn,
   }
 
   if(stream->memlen) {
+    ssize_t memlen = stream->memlen;
     /* data arrived */
     *curlcode = CURLE_OK;
-    infof(conn->data, "ngh3_stream_recv returns %zd bytes\n",
-          stream->memlen);
-    return stream->memlen;
+    /* reset to allow more data to come */
+    stream->memlen = 0;
+    stream->mem = buf;
+    stream->len = buffersize;
+    H3BUGF(infof(conn->data, "!! ngh3_stream_recv returns %zd bytes at %p\n",
+                 memlen, buf));
+    return memlen;
   }
 
   if(stream->closed) {
@@ -1497,17 +1540,37 @@ static ssize_t ngh3_stream_recv(struct connectdata *conn,
   return -1;
 }
 
+/* this amount of data has now been acked on this stream */
+static int cb_h3_acked_stream_data(nghttp3_conn *conn, int64_t stream_id,
+                                   size_t datalen, void *user_data,
+                                   void *stream_user_data)
+{
+  struct Curl_easy *data = stream_user_data;
+  struct HTTP *stream = data->req.protop;
+  (void)conn;
+  (void)stream_id;
+  (void)user_data;
+
+  if(!data->set.postfields) {
+    stream->h3out->used -= datalen;
+    fprintf(stderr, "cb_h3_acked_stream_data, %zd bytes, %zd left unacked\n",
+            datalen, stream->h3out->used);
+    DEBUGASSERT(stream->h3out->used < H3_SEND_SIZE);
+  }
+  return 0;
+}
+
 static int cb_h3_readfunction(nghttp3_conn *conn, int64_t stream_id,
                               const uint8_t **pdata,
                               size_t *pdatalen, uint32_t *pflags,
                               void *user_data, void *stream_user_data)
 {
   struct Curl_easy *data = stream_user_data;
+  size_t nread;
+  struct HTTP *stream = data->req.protop;
   (void)conn;
   (void)stream_id;
   (void)user_data;
-
-  fprintf(stderr, "called cb_h3_readfunction\n");
 
   if(data->set.postfields) {
     *pdata = data->set.postfields;
@@ -1516,6 +1579,48 @@ static int cb_h3_readfunction(nghttp3_conn *conn, int64_t stream_id,
     return 0;
   }
 
+  nread = CURLMIN(stream->upload_len, H3_SEND_SIZE - stream->h3out->used);
+  if(nread > 0) {
+    /* nghttp3 wants us to hold on to the data until it tells us it is okay to
+       delete it. Append the data at the end of the h3out buffer. Since we can
+       only return consecutive data, copy the amount that fits and the next
+       part comes in next invoke. */
+    struct h3out *out = stream->h3out;
+    if(nread + out->windex > H3_SEND_SIZE)
+      nread = H3_SEND_SIZE - out->windex;
+
+    memcpy(&out->buf[out->windex], stream->upload_mem, nread);
+    out->windex += nread;
+    out->used += nread;
+
+    /* that's the chunk we return to nghttp3 */
+    *pdata = &out->buf[out->windex];
+    *pdatalen = nread;
+
+    if(out->windex == H3_SEND_SIZE)
+      out->windex = 0; /* wrap */
+    stream->upload_mem += nread;
+    stream->upload_len -= nread;
+    if(data->state.infilesize != -1) {
+      stream->upload_left -= nread;
+      if(!stream->upload_left)
+        *pflags = NGHTTP3_DATA_FLAG_EOF;
+    }
+    fprintf(stderr, "cb_h3_readfunction %zd bytes%s (at %zd unacked)\n",
+            nread, *pflags == NGHTTP3_DATA_FLAG_EOF?" EOF":"",
+            out->used);
+  }
+  if(stream->upload_done && !stream->upload_len &&
+     (stream->upload_left <= 0)) {
+    H3BUGF(infof(data, "!!!!!!!!! cb_h3_readfunction sets EOF\n"));
+    *pdata = NULL;
+    *pdatalen = 0;
+    *pflags = NGHTTP3_DATA_FLAG_EOF;
+  }
+  else if(!nread) {
+    *pdatalen = 0;
+    return NGHTTP3_ERR_WOULDBLOCK;
+  }
   return 0;
 }
 
@@ -1538,6 +1643,7 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
   nghttp3_nv *nva = NULL;
   int64_t stream3_id;
   int rc;
+  struct h3out *h3out = NULL;
 
   rc = ngtcp2_conn_open_bidi_stream(qs->qconn, &stream3_id, NULL);
   if(rc) {
@@ -1702,12 +1808,6 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
     }
   }
 
-  stream->header_recvbuf = Curl_add_buffer_init();
-  if(!stream->header_recvbuf) {
-    result = CURLE_OUT_OF_MEMORY;
-    goto fail;
-  }
-
   switch(data->set.httpreq) {
   case HTTPREQ_POST:
   case HTTPREQ_POST_FORM:
@@ -1721,6 +1821,13 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
       stream->upload_left = -1; /* unknown, but not zero */
 
     data_reader.read_data = cb_h3_readfunction;
+
+    h3out = calloc(sizeof(struct h3out), 1);
+    if(!h3out) {
+      result = CURLE_OUT_OF_MEMORY;
+      goto fail;
+    }
+    stream->h3out = h3out;
 
     rc = nghttp3_conn_submit_request(qs->h3conn, stream->stream3_id,
                                      nva, nheader, &data_reader,
@@ -1745,15 +1852,6 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
   }
 
   Curl_safefree(nva);
-
-  if(!stream->upload_left) {
-    /* done with this stream, FIN it */
-    rc = nghttp3_conn_end_stream(qs->h3conn, stream->stream3_id);
-    if(rc) {
-      result = CURLE_SEND_ERROR;
-      goto fail;
-    }
-  }
 
   infof(data, "Using HTTP/3 Stream ID: %x (easy handle %p)\n",
         stream3_id, (void *)data);
@@ -1784,8 +1882,17 @@ static ssize_t ngh3_stream_send(struct connectdata *conn,
     sent = len;
   }
   else {
-    (void)qs;
-    /* TODO */
+    fprintf(stderr, "ngh3_stream_send() wants to send %zd bytes\n", len);
+    if(!stream->upload_len) {
+      stream->upload_mem = mem;
+      stream->upload_len = len;
+      (void)nghttp3_conn_resume_stream(qs->h3conn, stream->stream3_id);
+      sent = len;
+    }
+    else {
+      *curlcode = CURLE_AGAIN;
+      return -1;
+    }
   }
 
   if(ng_flush_egress(conn, sockfd, qs)) {
@@ -1801,7 +1908,7 @@ static void ng_has_connected(struct connectdata *conn, int tempindex)
 {
   conn->recv[FIRSTSOCKET] = ngh3_stream_recv;
   conn->send[FIRSTSOCKET] = ngh3_stream_send;
-  conn->handler = &Curl_handler_h3_quiche;
+  conn->handler = &Curl_handler_http3;
   conn->bits.multiplex = TRUE; /* at least potentially multiplexed */
   conn->httpversion = 30;
   conn->bundle->multiuse = BUNDLE_MULTIPLEX;
@@ -2018,6 +2125,24 @@ static CURLcode ng_flush_egress(struct connectdata *conn, int sockfd,
       timeout = expiry - ts;
     }
     Curl_expire(conn->data, timeout / NGTCP2_MILLISECONDS, EXPIRE_QUIC);
+  }
+
+  return CURLE_OK;
+}
+
+/*
+ * Called from transfer.c:done_sending when we stop HTTP/3 uploading.
+ */
+CURLcode Curl_quic_done_sending(struct connectdata *conn)
+{
+  if(conn->handler == &Curl_handler_http3) {
+    /* only for HTTP/3 transfers */
+    struct HTTP *stream = conn->data->req.protop;
+    struct quicsocket *qs = conn->quic;
+    fprintf(stderr, "!!! Curl_quic_done_sending stream %zu\n",
+            stream->stream3_id);
+    stream->upload_done = TRUE;
+    (void)nghttp3_conn_resume_stream(qs->h3conn, stream->stream3_id);
   }
 
   return CURLE_OK;
