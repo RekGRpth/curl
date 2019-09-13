@@ -3,6 +3,7 @@
 <keywords>
 FTP
 PASV
+TYPE A
 RETR
 </keywords>
 </info>
@@ -16,6 +17,13 @@ that FTP
 works
   so does it?
 </data>
+<datacheck nonewline="yes">
+data
+</datacheck>
+<servercmd>
+REPLY EPSV 500 no such command
+REPLY SIZE 213 file: 213, Size =51
+</servercmd>
 </reply>
 
 # Client-side
@@ -24,12 +32,11 @@ works
 ftp
 </server>
  <name>
-FTP fetch two files using absolute paths
+FTP range download with SIZE returning extra crap
  </name>
  <command>
-ftp://%HOSTIP:%FTPPORT//foo/1225 ftp://%HOSTIP:%FTPPORT//foo/bar/1225
+ftp://%HOSTIP:%FTPPORT/337 --use-ascii --range 3-6
 </command>
-
 </client>
 
 # Verify data after the test has been "shot"
@@ -38,18 +45,13 @@ ftp://%HOSTIP:%FTPPORT//foo/1225 ftp://%HOSTIP:%FTPPORT//foo/bar/1225
 USER anonymous
 PASS ftp@example.com
 PWD
-CWD /
-CWD foo
 EPSV
-TYPE I
-SIZE 1225
-RETR 1225
-CWD /
-CWD foo
-CWD bar
-EPSV
-SIZE 1225
-RETR 1225
+PASV
+TYPE A
+SIZE 337
+REST 3
+RETR 337
+ABOR
 QUIT
 </protocol>
 </verify>

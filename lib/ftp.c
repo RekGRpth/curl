@@ -877,7 +877,9 @@ static CURLcode ftp_state_cwd(struct connectdata *conn)
     if((conn->data->set.ftp_filemethod == FTPFILE_NOCWD) && !ftpc->cwdcount)
       /* No CWD necessary */
       result = ftp_state_mdtm(conn);
-    else if(conn->bits.reuse && ftpc->entrypath) {
+    else if(conn->bits.reuse && ftpc->entrypath &&
+            /* no need to go to entrypath when we have an absolute path */
+            !(ftpc->dirdepth && ftpc->dirs[0][0] == '/')) {
       /* This is a re-used connection. Since we change directory to where the
          transfer is taking place, we must first get back to the original dir
          where we ended up after login: */
@@ -2242,9 +2244,25 @@ static CURLcode ftp_state_size_resp(struct connectdata *conn,
   char *buf = data->state.buffer;
 
   /* get the size from the ascii string: */
-  if(ftpcode == 213)
+  if(ftpcode == 213) {
+    /* To allow servers to prepend "rubbish" in the response string, we scan
+       for all the digits at the end of the response and parse only those as a
+       number. */
+    char *start = &buf[4];
+    char *fdigit = strchr(start, '\r');
+    if(fdigit) {
+      do
+        fdigit--;
+      while(ISDIGIT(*fdigit) && (fdigit > start));
+      if(!ISDIGIT(*fdigit))
+        fdigit++;
+    }
+    else
+      fdigit = start;
     /* ignores parsing errors, which will make the size remain unknown */
-    (void)curlx_strtoofft(buf + 4, NULL, 0, &filesize);
+    (void)curlx_strtoofft(fdigit, NULL, 0, &filesize);
+
+  }
 
   if(instate == FTP_SIZE) {
 #ifdef CURL_FTP_HTTPSTYLE_HEAD
