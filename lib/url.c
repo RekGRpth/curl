@@ -408,6 +408,7 @@ CURLcode Curl_close(struct Curl_easy *data)
   Curl_close(data->req.doh.probe[1].easy);
   free(data->req.doh.probe[0].serverdoh.memory);
   free(data->req.doh.probe[1].serverdoh.memory);
+  curl_slist_free_all(data->req.doh.headers);
 
   /* destruct wildcard structures if it is needed */
   Curl_wildcard_dtor(&data->wildcard);
@@ -3529,6 +3530,10 @@ static CURLcode create_conn(struct Curl_easy *data,
     data->set.str[STRING_SSL_CIPHER13_LIST_ORIG];
   data->set.proxy_ssl.primary.cipher_list13 =
     data->set.str[STRING_SSL_CIPHER13_LIST_PROXY];
+  data->set.ssl.primary.pinned_key =
+    data->set.str[STRING_SSL_PINNEDPUBLICKEY_ORIG];
+  data->set.proxy_ssl.primary.pinned_key =
+    data->set.str[STRING_SSL_PINNEDPUBLICKEY_PROXY];
 
   data->set.ssl.CRLfile = data->set.str[STRING_SSL_CRLFILE_ORIG];
   data->set.proxy_ssl.CRLfile = data->set.str[STRING_SSL_CRLFILE_PROXY];
