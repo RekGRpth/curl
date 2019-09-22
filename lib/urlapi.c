@@ -351,7 +351,7 @@ static char *concat_url(const char *base, const char *relurl)
   else {
     /* We got a new absolute path for this server */
 
-    if((relurl[0] == '/') && (relurl[1] == '/')) {
+    if(relurl[1] == '/') {
       /* the new URL starts with //, just keep the protocol part from the
          original one */
       *protsep = 0;
@@ -598,6 +598,8 @@ static CURLUcode hostname_check(struct Curl_URL *u, char *hostname)
   if(hostname[0] == '[') {
     char dest[16]; /* fits a binary IPv6 address */
     const char *l = "0123456789abcdefABCDEF:.";
+    if(hlen < 5) /* '[::1]' is the shortest possible valid string */
+      return CURLUE_MALFORMED_INPUT;
     hostname++;
     hlen -= 2;
 
@@ -1084,24 +1086,23 @@ CURLUcode curl_url_get(CURLU *u, CURLUPart what,
       else
         return CURLUE_NO_SCHEME;
 
-      if(scheme) {
-        h = Curl_builtin_scheme(scheme);
-        if(!port && (flags & CURLU_DEFAULT_PORT)) {
-          /* there's no stored port number, but asked to deliver
-             a default one for the scheme */
-          if(h) {
-            msnprintf(portbuf, sizeof(portbuf), "%ld", h->defport);
-            port = portbuf;
-          }
-        }
-        else if(port) {
-          /* there is a stored port number, but asked to inhibit if it matches
-             the default one for the scheme */
-          if(h && (h->defport == u->portnum) &&
-             (flags & CURLU_NO_DEFAULT_PORT))
-            port = NULL;
+      h = Curl_builtin_scheme(scheme);
+      if(!port && (flags & CURLU_DEFAULT_PORT)) {
+        /* there's no stored port number, but asked to deliver
+           a default one for the scheme */
+        if(h) {
+          msnprintf(portbuf, sizeof(portbuf), "%ld", h->defport);
+          port = portbuf;
         }
       }
+      else if(port) {
+        /* there is a stored port number, but asked to inhibit if it matches
+           the default one for the scheme */
+        if(h && (h->defport == u->portnum) &&
+           (flags & CURLU_NO_DEFAULT_PORT))
+          port = NULL;
+      }
+
       if(h && !(h->flags & PROTOPT_URLOPTIONS))
         options = NULL;
 
@@ -1349,7 +1350,8 @@ CURLUcode curl_url_set(CURLU *u, CURLUPart what,
   default:
     return CURLUE_UNKNOWN_PART;
   }
-  if(storep) {
+  DEBUGASSERT(storep);
+  {
     const char *newp = part;
     size_t nalloc = strlen(part);
 

@@ -1052,7 +1052,7 @@ ConnectionExists(struct Curl_easy *data,
     /* We can't multiplex if we don't know anything about the server */
     if(canmultiplex) {
       if(bundle->multiuse == BUNDLE_UNKNOWN) {
-        if((bundle->multiuse == BUNDLE_UNKNOWN) && data->set.pipewait) {
+        if(data->set.pipewait) {
           infof(data, "Server doesn't support multiplex yet, wait\n");
           *waitpipe = TRUE;
           Curl_conncache_unlock(data);
@@ -2761,13 +2761,6 @@ static CURLcode set_login(struct connectdata *conn)
   /* Store the default password */
   if(!conn->passwd) {
     conn->passwd = strdup(setpasswd);
-    if(!conn->passwd)
-      result = CURLE_OUT_OF_MEMORY;
-  }
-
-  /* if there's a user without password, consider password blank */
-  if(conn->user && !conn->passwd) {
-    conn->passwd = strdup("");
     if(!conn->passwd)
       result = CURLE_OUT_OF_MEMORY;
   }

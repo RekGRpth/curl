@@ -977,11 +977,11 @@ static CURLcode create_transfers(struct GlobalConfig *global,
 #ifdef __VMS
             /* open file for output, forcing VMS output format into stream
                mode which is needed for stat() call above to always work. */
-            FILE *file = fopen(outfile, config->resume_from?"ab":"wb",
+            FILE *file = fopen(outfile, "ab",
                                "ctx=stm", "rfm=stmlf", "rat=cr", "mrs=0");
 #else
             /* open file for output: */
-            FILE *file = fopen(per->outfile, config->resume_from?"ab":"wb");
+            FILE *file = fopen(per->outfile, "ab");
 #endif
             if(!file) {
               helpf(global->errors, "Can't open '%s'!\n", per->outfile);
@@ -1885,15 +1885,9 @@ static CURLcode create_transfers(struct GlobalConfig *global,
         urls = NULL;
       }
 
-      if(infilenum > 1) {
-        /* when file globbing, exit loop upon critical error */
-        if(is_fatal_error(result))
-          break;
-      }
-      else if(result)
-        /* when not file globbing, exit loop upon any error */
+      if(result)
+        /* exit loop upon error */
         break;
-
     } /* loop to the next globbed upload file */
 
     /* Free loop-local allocated memory */
@@ -1913,6 +1907,9 @@ static CURLcode create_transfers(struct GlobalConfig *global,
     Curl_safefree(urlnode->infile);
     urlnode->flags = 0;
 
+    if(result)
+      /* exit loop upon error */
+      break;
   } /* for-loop through all URLs */
   quit_curl:
 
@@ -1968,7 +1965,6 @@ static CURLcode parallel_transfers(struct GlobalConfig *global,
                                    CURLSH *share)
 {
   CURLM *multi;
-  bool done = FALSE;
   CURLMcode mcode = CURLM_OK;
   CURLcode result = CURLE_OK;
   int still_running = 1;
@@ -1985,7 +1981,7 @@ static CURLcode parallel_transfers(struct GlobalConfig *global,
   if(result)
     return result;
 
-  while(!done && !mcode && (still_running || more_transfers)) {
+  while(!mcode && (still_running || more_transfers)) {
     mcode = curl_multi_poll(multi, NULL, 0, 1000, NULL);
     if(!mcode)
       mcode = curl_multi_perform(multi, &still_running);
