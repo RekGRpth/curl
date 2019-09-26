@@ -50,7 +50,7 @@
 
 #define QUIC_MAX_STREAMS (256*1024)
 #define QUIC_MAX_DATA (1*1024*1024)
-#define QUIC_IDLE_TIMEOUT 60 * 1000 /* milliseconds */
+#define QUIC_IDLE_TIMEOUT (60 * 1000) /* milliseconds */
 
 static CURLcode process_ingress(struct connectdata *conn,
                                 curl_socket_t sockfd,
@@ -646,8 +646,10 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
       nva[i].name_len = strlen((char *)nva[i].name);
     }
     else {
-      nva[i].name = (unsigned char *)hdbuf;
       nva[i].name_len = (size_t)(end - hdbuf);
+      /* Lower case the header name for HTTP/3 */
+      Curl_strntolower((char *)hdbuf, hdbuf, nva[i].name_len);
+      nva[i].name = (unsigned char *)hdbuf;
     }
     hdbuf = end + 1;
     while(*hdbuf == ' ' || *hdbuf == '\t')
