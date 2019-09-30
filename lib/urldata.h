@@ -68,6 +68,7 @@
 #define PROTO_FAMILY_POP3 (CURLPROTO_POP3|CURLPROTO_POP3S)
 #define PROTO_FAMILY_SMB  (CURLPROTO_SMB|CURLPROTO_SMBS)
 #define PROTO_FAMILY_SMTP (CURLPROTO_SMTP|CURLPROTO_SMTPS)
+#define PROTO_FAMILY_SSH  (CURLPROTO_SCP|CURLPROTO_SFTP)
 
 #define DEFAULT_CONNCACHE_SIZE 5
 
@@ -1396,6 +1397,7 @@ struct UrlState {
                   invoked twice when the multi interface is used. */
   BIT(stream_depends_e); /* set or don't set the Exclusive bit */
   BIT(previouslypending); /* this transfer WAS in the multi->pending queue */
+  BIT(cookie_engine);
 };
 
 

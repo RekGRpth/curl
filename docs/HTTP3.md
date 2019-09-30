@@ -55,7 +55,7 @@ Build ngtcp2
      % git clone https://github.com/ngtcp2/ngtcp2
      % cd ngtcp2
      % autoreconf -i
-     % ./configure PKG_CONFIG_PATH=<somewhere1>/lib/pkgconfig:<somewhere2>/lib/pkgconfig LDFLAGS="-Wl,-rpath,<somehere1>/lib" --prefix==<somewhere3>
+     % ./configure PKG_CONFIG_PATH=<somewhere1>/lib/pkgconfig:<somewhere2>/lib/pkgconfig LDFLAGS="-Wl,-rpath,<somehere1>/lib" --prefix=<somewhere3>
      % make
      % make install
 
@@ -67,15 +67,6 @@ Build curl
      % ./buildconf
      % LDFLAGS="-Wl,-rpath,<somewhere1>/lib" ./configure --with-ssl=<somewhere1> --with-nghttp3=<somewhere2> --with-ngtcp2=<somewhere3>
      % make
-
-## Running
-
-Make sure the custom OpenSSL library is the one used at run-time, as otherwise
-you'll just get ld.so linker errors.
-
-## Invoke from command line
-
-    curl --http3 https://nghttp2.org:8443/
 
 # quiche version
 
@@ -111,11 +102,14 @@ Clone and build curl:
      % ./configure LDFLAGS="-Wl,-rpath,$PWD/../quiche/target/release" --with-ssl=$PWD/../quiche/deps/boringssl/.openssl --with-quiche=$PWD/../quiche/target/release
      % make
 
-## Running
+## Run
 
-Make an HTTP/3 request.
+Use HTTP/3 directly:
 
-     % src/curl --http3 https://cloudflare-quic.com/
-     % src/curl --http3 https://facebook.com/
-     % src/curl --http3 https://quic.aiortc.org:4433/
-     % src/curl --http3 https://quic.rocks:4433/
+    curl --http3 https://nghttp2.org:8443/
+
+Upgrade via Alt-Svc:
+
+    curl --alt-svc altsvc.cache https://quic.aiortc.org/
+
+See this [list of public HTTP/3 servers](https://bagder.github.io/HTTP3-test/)
