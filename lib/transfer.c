@@ -777,14 +777,14 @@ static CURLcode readwrite_data(struct Curl_easy *data,
          * and writes away the data. The returned 'nread' holds the number
          * of actual data it wrote to the client.
          */
-
+        CURLcode extra;
         CHUNKcode res =
-          Curl_httpchunk_read(conn, k->str, nread, &nread);
+          Curl_httpchunk_read(conn, k->str, nread, &nread, &extra);
 
         if(CHUNKE_OK < res) {
-          if(CHUNKE_WRITE_ERROR == res) {
-            failf(data, "Failed writing data");
-            return CURLE_WRITE_ERROR;
+          if(CHUNKE_PASSTHRU_ERROR == res) {
+            failf(data, "Failed reading the chunked-encoded stream");
+            return extra;
           }
           failf(data, "%s in chunked-encoding", Curl_chunked_strerror(res));
           return CURLE_RECV_ERROR;
@@ -1592,7 +1592,8 @@ CURLcode Curl_follow(struct Curl_easy *data,
 
   DEBUGASSERT(data->state.uh);
   uc = curl_url_set(data->state.uh, CURLUPART_URL, newurl,
-                    (type == FOLLOW_FAKE) ? CURLU_NON_SUPPORT_SCHEME : 0);
+                    (type == FOLLOW_FAKE) ? CURLU_NON_SUPPORT_SCHEME :
+                    ((type == FOLLOW_REDIR) ? CURLU_URLENCODE : 0) );
   if(uc) {
     if(type != FOLLOW_FAKE)
       return Curl_uc_to_curlcode(uc);

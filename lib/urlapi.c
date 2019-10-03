@@ -596,7 +596,9 @@ static CURLUcode hostname_check(struct Curl_URL *u, char *hostname)
   size_t hlen = strlen(hostname);
 
   if(hostname[0] == '[') {
+#ifdef ENABLE_IPV6
     char dest[16]; /* fits a binary IPv6 address */
+#endif
     const char *l = "0123456789abcdefABCDEF:.";
     if(hlen < 5) /* '[::1]' is the shortest possible valid string */
       return CURLUE_MALFORMED_INPUT;
@@ -849,6 +851,16 @@ static CURLUcode seturl(const char *url, CURLU *u, unsigned int flags)
   if(junkscan(path))
     return CURLUE_MALFORMED_INPUT;
 
+  if((flags & CURLU_URLENCODE) && path[0]) {
+    /* worst case output length is 3x the original! */
+    char *newp = malloc(strlen(path) * 3);
+    if(!newp)
+      return CURLUE_OUT_OF_MEMORY;
+    path_alloced = TRUE;
+    strcpy_url(newp, path, TRUE); /* consider it relative */
+    path = newp;
+  }
+
   fragment = strchr(path, '#');
   if(fragment)
     *fragment++ = 0;
@@ -863,11 +875,16 @@ static CURLUcode seturl(const char *url, CURLU *u, unsigned int flags)
   else if(!(flags & CURLU_PATH_AS_IS)) {
     /* sanitise paths and remove ../ and ./ sequences according to RFC3986 */
     char *newp = Curl_dedotdotify(path);
-    if(!newp)
+    if(!newp) {
+      if(path_alloced)
+        free(path);
       return CURLUE_OUT_OF_MEMORY;
+    }
 
     if(strcmp(newp, path)) {
       /* if we got a new version */
+      if(path_alloced)
+        free(path);
       path = newp;
       path_alloced = TRUE;
     }
