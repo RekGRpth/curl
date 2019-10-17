@@ -1796,6 +1796,7 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
   }
 
   if(!data->set.uh) {
+    char *newurl;
     uc = curl_url_set(uh, CURLUPART_URL, data->change.url,
                     CURLU_GUESS_SCHEME |
                     CURLU_NON_SUPPORT_SCHEME |
@@ -1806,6 +1807,15 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
       DEBUGF(infof(data, "curl_url_set rejected %s\n", data->change.url));
       return Curl_uc_to_curlcode(uc);
     }
+
+    /* after it was parsed, get the generated normalized version */
+    uc = curl_url_get(uh, CURLUPART_URL, &newurl, 0);
+    if(uc)
+      return Curl_uc_to_curlcode(uc);
+    if(data->change.url_alloc)
+      free(data->change.url);
+    data->change.url = newurl;
+    data->change.url_alloc = TRUE;
   }
 
   uc = curl_url_get(uh, CURLUPART_SCHEME, &data->state.up.scheme, 0);
