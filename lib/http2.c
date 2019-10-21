@@ -848,6 +848,7 @@ static int on_stream_close(nghttp2_session *session, int32_t stream_id,
     stream->closed = TRUE;
     httpc = &conn->proto.httpc;
     drain_this(data_s, httpc);
+    Curl_expire(data_s, 0, EXPIRE_RUN_NOW);
     httpc->error_code = error_code;
 
     /* remove the entry from the hash as the stream is now gone */
@@ -1662,6 +1663,9 @@ static ssize_t http2_recv(struct connectdata *conn, int sockindex,
        socket is not read.  But it seems that usually streams are
        notified with its drain property, and socket is read again
        quickly. */
+    if(stream->closed)
+      /* closed overrides paused */
+      return 0;
     H2BUGF(infof(data, "stream %x is paused, pause id: %x\n",
                  stream->stream_id, httpc->pause_stream_id));
     *err = CURLE_AGAIN;
