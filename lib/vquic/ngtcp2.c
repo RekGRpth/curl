@@ -550,7 +550,7 @@ CURLcode Curl_quic_connect(struct connectdata *conn,
   if(!Curl_addr2string((struct sockaddr*)addr, addrlen, ipbuf, &port)) {
     char buffer[STRERROR_LEN];
     failf(data, "ssrem inet_ntop() failed with errno %d: %s",
-          errno, Curl_strerror(errno, buffer, sizeof(buffer)));
+          SOCKERRNO, Curl_strerror(SOCKERRNO, buffer, sizeof(buffer)));
     return CURLE_BAD_FUNCTION_ARGUMENT;
   }
 
@@ -1404,13 +1404,13 @@ static CURLcode ng_process_ingress(struct connectdata *conn, int sockfd,
 
   for(;;) {
     remote_addrlen = sizeof(remote_addr);
-    while((recvd = recvfrom(sockfd, buf, bufsize, MSG_DONTWAIT,
+    while((recvd = recvfrom(sockfd, buf, bufsize, 0,
                             (struct sockaddr *)&remote_addr,
                             &remote_addrlen)) == -1 &&
-          errno == EINTR)
+          SOCKERRNO == EINTR)
       ;
     if(recvd == -1) {
-      if(errno == EAGAIN || errno == EWOULDBLOCK)
+      if(SOCKERRNO == EAGAIN || SOCKERRNO == EWOULDBLOCK)
         break;
 
       failf(conn->data, "ngtcp2: recvfrom() unexpectedly returned %d", recvd);
@@ -1544,19 +1544,17 @@ static CURLcode ng_flush_egress(struct connectdata *conn, int sockfd,
     }
 
     memcpy(&remote_addr, ps.path.remote.addr, ps.path.remote.addrlen);
-    while((sent = sendto(sockfd, out, outlen, MSG_DONTWAIT,
-                         (struct sockaddr *)&remote_addr,
-                         (socklen_t)ps.path.remote.addrlen)) == -1 &&
-          errno == EINTR)
+    while((sent = send(sockfd, out, outlen, 0)) == -1 &&
+          SOCKERRNO == EINTR)
       ;
 
     if(sent == -1) {
-      if(errno == EAGAIN || errno == EWOULDBLOCK) {
+      if(SOCKERRNO == EAGAIN || SOCKERRNO == EWOULDBLOCK) {
         /* TODO Cache packet */
         break;
       }
       else {
-        failf(conn->data, "sendto() returned %zd (errno %d)\n", sent,
+        failf(conn->data, "send() returned %zd (errno %d)\n", sent,
               SOCKERRNO);
         return CURLE_SEND_ERROR;
       }
