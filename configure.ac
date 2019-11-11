@@ -4400,7 +4400,7 @@ dnl
 AC_MSG_CHECKING([whether to support DNS shuffling])
 AC_ARG_ENABLE(dnsshuffle,
 AC_HELP_STRING([--enable-dnsshuffle],[Enable DNS shuffling])
-AC_HELP_STRING([--disable-dnsshuffle],[Disable DNS shufflinf]),
+AC_HELP_STRING([--disable-dnsshuffle],[Disable DNS shuffling]),
 [ case "$enableval" in
   no)
        AC_MSG_RESULT(no)
@@ -4449,7 +4449,7 @@ if test "x$want_esni" != "xno"; then
 
   dnl OpenSSL with a chosen ESNI function should be enough
   dnl so more exhaustive checking seems unnecessary for now
-  if test "x$OPENSSL_ENABLED" == "x1"; then
+  if test "x$OPENSSL_ENABLED" = "x1"; then
     AC_CHECK_FUNCS(SSL_get_esni_status,
       ESNI_SUPPORT="ESNI support available (OpenSSL with SSL_get_esni_status)"
       ESNI_ENABLED=1)
@@ -4458,7 +4458,7 @@ if test "x$want_esni" != "xno"; then
   fi
 
   dnl now deal with whatever we found
-  if test "x$ESNI_ENABLED" == "x1"; then
+  if test "x$ESNI_ENABLED" = "x1"; then
     AC_DEFINE(USE_ESNI, 1, [if ESNI support is available])
     AC_MSG_RESULT($ESNI_SUPPORT)
     experimental="$experimental ESNI"
