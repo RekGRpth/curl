@@ -342,6 +342,7 @@ CURLM_INTERNAL_ERROR            7.9.6
 CURLM_OK                        7.9.6
 CURLM_OUT_OF_MEMORY             7.9.6
 CURLM_RECURSIVE_API_CALL        7.59.0
+CURLM_WAKEUP_FAILURE            7.68.0
 CURLM_UNKNOWN_OPTION            7.15.4
 CURLOPTTYPE_FUNCTIONPOINT       7.1
 CURLOPTTYPE_LONG                7.1
@@ -720,6 +721,7 @@ CURLSSH_AUTH_NONE               7.16.1
 CURLSSH_AUTH_PASSWORD           7.16.1
 CURLSSH_AUTH_PUBLICKEY          7.16.1
 CURLSSLBACKEND_AXTLS            7.38.0       7.61.0
+CURLSSLBACKEND_BEARSSL          7.68.0
 CURLSSLBACKEND_BORINGSSL        7.49.0
 CURLSSLBACKEND_CYASSL           7.34.0
 CURLSSLBACKEND_DARWINSSL        7.34.0       7.64.1
@@ -868,6 +870,7 @@ CURL_POLL_INOUT                 7.14.0
 CURL_POLL_NONE                  7.14.0
 CURL_POLL_OUT                   7.14.0
 CURL_POLL_REMOVE                7.14.0
+CURL_PROGRESSFUNC_CONTINUE      7.68.0
 CURL_PROGRESS_BAR               7.1.1         -           7.4.1
 CURL_PROGRESS_STATS             7.1.1         -           7.4.1
 CURL_PUSH_DENY                  7.44.0

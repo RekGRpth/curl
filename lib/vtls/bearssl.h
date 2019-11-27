@@ -1,5 +1,5 @@
-#ifndef HEADER_CURL_TOOL_CB_REA_H
-#define HEADER_CURL_TOOL_CB_REA_H
+#ifndef HEADER_CURL_BEARSSL_H
+#define HEADER_CURL_BEARSSL_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -7,7 +7,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2019, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 2019, Michael Forney, <mforney@mforney.org>
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -21,20 +21,12 @@
  * KIND, either express or implied.
  *
  ***************************************************************************/
-#include "tool_setup.h"
 
-/*
-** callback for CURLOPT_READFUNCTION
-*/
+#include "curl_setup.h"
 
-size_t tool_read_cb(void *buffer, size_t sz, size_t nmemb, void *userdata);
+#ifdef USE_BEARSSL
 
-/*
-** callback for CURLOPT_XFERINFOFUNCTION used to unpause busy reads
-*/
+extern const struct Curl_ssl Curl_ssl_bearssl;
 
-int tool_readbusy_cb(void *clientp,
-                     curl_off_t dltotal, curl_off_t dlnow,
-                     curl_off_t ultotal, curl_off_t ulnow);
-
-#endif /* HEADER_CURL_TOOL_CB_REA_H */
+#endif /* USE_BEARSSL */
+#endif /* HEADER_CURL_BEARSSL_H */
