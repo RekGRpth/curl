@@ -889,16 +889,6 @@ static CURLcode single_transfer(struct GlobalConfig *global,
           }
         }
 
-        /* disallowing simultaneous use of --etag-save and --etag-compare */
-        if(config->etag_save_file && config->etag_compare_file) {
-          warnf(
-            config->global,
-            "Cannot use --etag-save and --etag-compare at the same time\n");
-
-          result = CURLE_UNKNOWN_OPTION;
-          break;
-        }
-
         /* --etag-save */
         etag_save = &per->etag_save;
         etag_save->stream = stdout;
@@ -932,7 +922,6 @@ static CURLcode single_transfer(struct GlobalConfig *global,
         if(config->etag_compare_file) {
           char *etag_from_file = NULL;
           char *header = NULL;
-          size_t file_size = 0;
 
           /* open file for reading: */
           FILE *file = fopen(config->etag_compare_file, FOPEN_READTEXT);
@@ -945,23 +934,11 @@ static CURLcode single_transfer(struct GlobalConfig *global,
             break;
           }
 
-          /* get file size */
-          fseek(file, 0, SEEK_END);
-          file_size = ftell(file);
-
-          /*
-           * check if file is empty, if it's not load etag
-           * else continue with empty etag
-           */
-          if(file_size != 0) {
-            fseek(file, 0, SEEK_SET);
-            file2string(&etag_from_file, file);
-
+          if((PARAM_OK == file2string(&etag_from_file, file)) &&
+             etag_from_file)
             header = aprintf("If-None-Match: \"%s\"", etag_from_file);
-          }
-          else {
+          else
             header = aprintf("If-None-Match: \"\"");
-          }
 
           if(!header) {
             warnf(
@@ -1615,7 +1592,7 @@ static CURLcode single_transfer(struct GlobalConfig *global,
           if(!config->insecure_ok) {
             char *home;
             char *file;
-            result = CURLE_OUT_OF_MEMORY;
+            result = CURLE_FAILED_INIT;
             home = homedir();
             if(home) {
               file = aprintf("%s/.ssh/known_hosts", home);
@@ -1628,6 +1605,9 @@ static CURLcode single_transfer(struct GlobalConfig *global,
                   result = CURLE_OK;
               }
               Curl_safefree(home);
+            }
+            else {
+              errorf(global, "Failed to figure out user's home dir!");
             }
             if(result)
               break;
