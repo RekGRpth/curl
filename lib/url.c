@@ -1086,16 +1086,15 @@ ConnectionExists(struct Curl_easy *data,
       check = curr->ptr;
       curr = curr->next;
 
-      if(check->bits.connect_only)
-        /* connect-only connections will not be reused */
+      if(check->bits.connect_only || check->bits.close)
+        /* connect-only or to-be-closed connections will not be reused */
         continue;
 
       multiplexed = CONN_INUSE(check) &&
         (bundle->multiuse == BUNDLE_MULTIPLEX);
 
       if(canmultiplex) {
-        if(check->bits.protoconnstart && check->bits.close)
-          continue;
+        ;
       }
       else {
         if(multiplexed) {
@@ -1115,12 +1114,9 @@ ConnectionExists(struct Curl_easy *data,
           }
         }
 
-        if((check->sock[FIRSTSOCKET] == CURL_SOCKET_BAD) ||
-           check->bits.close) {
-          if(!check->bits.close)
-            foundPendingCandidate = TRUE;
-          /* Don't pick a connection that hasn't connected yet or that is going
-             to get closed. */
+        if(check->sock[FIRSTSOCKET] == CURL_SOCKET_BAD) {
+          foundPendingCandidate = TRUE;
+          /* Don't pick a connection that hasn't connected yet */
           infof(data, "Connection #%ld isn't open enough, can't reuse\n",
                 check->connection_id);
           continue;
@@ -1198,8 +1194,7 @@ ConnectionExists(struct Curl_easy *data,
            already in use so we skip it */
         continue;
 
-      if(CONN_INUSE(check) && check->data &&
-         (check->data->multi != needle->data->multi))
+      if(check->data && (check->data->multi != needle->data->multi))
         /* this could be subject for multiplex use, but only if they belong to
          * the same multi handle */
         continue;
@@ -1647,6 +1642,7 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
      it may live on without (this specific) Curl_easy */
   conn->fclosesocket = data->set.fclosesocket;
   conn->closesocket_client = data->set.closesocket_client;
+  conn->lastused = Curl_now(); /* used now */
 
   return conn;
   error:
@@ -3616,7 +3612,6 @@ static CURLcode create_conn(struct Curl_easy *data,
         reuse = FALSE;
 
         infof(data, "We can reuse, but we want a new connection anyway\n");
-        Curl_conncache_return_conn(conn_temp);
       }
     }
   }
