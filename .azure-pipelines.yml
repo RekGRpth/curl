@@ -6,13 +6,17 @@
 trigger:
 - master
 
+##########################################
+### Linux jobs first
+##########################################
+
 jobs:
   - job: vanilla_ubuntu
     displayName: unbuntu default
     pool:
       vmImage: 'ubuntu-latest'
     steps:
-    - script: ./buildconf && ./configure
+    - script: ./buildconf && ./configure --enable-debug --enable-werror
       displayName: 'Run configure'
 
     - script: make
@@ -77,6 +81,27 @@ jobs:
     - script: make test-nonflaky
       displayName: 'test'
 
+  - job: torture
+    displayName: ubuntu torture tests
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: sudo apt install libnghttp2-dev
+      displayName: 'apt install'
+
+    - script: ./buildconf && ./configure --enable-debug --disable-shared --disable-threaded-resolver --enable-alt-svc
+      displayName: 'Run configure'
+
+    - script: make
+      displayName: 'make'
+
+    - script: make "TFLAGS=-n -t --shallow=40 '!FTP'" test-nonflaky
+      displayName: 'torture test'
+
+##########################################
+### macOS jobs below
+##########################################
+
   - job: macos_plain
     displayName: macos default
     pool:
@@ -85,7 +110,7 @@ jobs:
     - script: brew update && brew install libtool autoconf automake nghttp2 pkg-config
       displayName: Install packages
 
-    - script: ./buildconf && ./configure
+    - script: ./buildconf && ./configure --enable-debug --enable-werror
       displayName: 'Run configure'
 
     - script: make
@@ -121,3 +146,21 @@ jobs:
 
     - script: cmake -H. -Bbuild -DOPENSSL_ROOT_DIR=/usr/local/opt/openssl -DCURL_DISABLE_LDAP=ON -DCURL_DISABLE_LDAPS=ON && cmake --build build
       displayName: 'Run cmake'
+
+  - job: macos_torture
+    displayName: macos torture
+    pool:
+      vmImage: 'macOS-latest'
+    steps:
+    - script: brew update && brew install libtool autoconf automake nghttp2 pkg-config
+      displayName: Install packages
+
+    - script: ./buildconf && ./configure --enable-debug --disable-shared --disable-threaded-resolver --enable-alt-svc
+      displayName: 'Run configure'
+
+    - script: make
+      displayName: 'make'
+
+    - script: make "TFLAGS=-n -t --shallow=25 '!FTP'" test-nonflaky
+      displayName: 'torture test'
+
