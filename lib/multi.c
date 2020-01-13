@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2019, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -1047,6 +1047,9 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
 
   if(multi->in_callback)
     return CURLM_RECURSIVE_API_CALL;
+
+  if(timeout_ms < 0)
+    return CURLM_BAD_FUNCTION_ARGUMENT;
 
   /* Count up how many fds we have from the multi handle */
   data = multi->easyp;

@@ -1,5 +1,5 @@
-#ifndef HEADER_CURL_TOOL_CB_WRT_H
-#define HEADER_CURL_TOOL_CB_WRT_H
+#ifndef HEADER_CURL_WOLFSSH_H
+#define HEADER_CURL_WOLFSSH_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -7,7 +7,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 2019 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -21,16 +21,7 @@
  * KIND, either express or implied.
  *
  ***************************************************************************/
-#include "tool_setup.h"
 
-/*
-** callback for CURLOPT_WRITEFUNCTION
-*/
+extern const struct Curl_handler Curl_handler_sftp;
 
-size_t tool_write_cb(char *buffer, size_t sz, size_t nmemb, void *userdata);
-
-/* create a local file for writing, return TRUE on success */
-bool tool_create_output_file(struct OutStruct *outs,
-                             struct OperationConfig *config);
-
-#endif /* HEADER_CURL_TOOL_CB_WRT_H */
+#endif /* HEADER_CURL_WOLFSSH_H */

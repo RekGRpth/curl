@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2019, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -156,7 +156,7 @@ static void MD4_Init(MD4_CTX *ctx)
 
 static void MD4_Update(MD4_CTX *ctx, const void *data, unsigned long size)
 {
-  CryptHashData(ctx->hHash, data, (unsigned int) size, 0);
+  CryptHashData(ctx->hHash, (BYTE *)data, (unsigned int) size, 0);
 }
 
 static void MD4_Final(unsigned char *result, MD4_CTX *ctx)

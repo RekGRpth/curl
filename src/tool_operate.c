@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2019, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -380,7 +380,7 @@ static CURLcode post_per_transfer(struct GlobalConfig *global,
     /* do not create (or even overwrite) the file in case we get no
        data because of unmet condition */
     curl_easy_getinfo(curl, CURLINFO_CONDITION_UNMET, &cond_unmet);
-    if(!cond_unmet && !tool_create_output_file(outs))
+    if(!cond_unmet && !tool_create_output_file(outs, config))
       result = CURLE_WRITE_ERROR;
   }
 
@@ -866,7 +866,6 @@ static CURLcode single_transfer(struct GlobalConfig *global,
         /* default headers output stream is stdout */
         heads = &per->heads;
         heads->stream = stdout;
-        heads->config = config;
 
         /* Single header file for all URLs */
         if(config->headerfile) {
@@ -891,10 +890,22 @@ static CURLcode single_transfer(struct GlobalConfig *global,
           }
         }
 
+        hdrcbdata = &per->hdrcbdata;
+
+        outs = &per->outs;
+        input = &per->input;
+
+        per->outfile = NULL;
+        per->infdopen = FALSE;
+        per->infd = STDIN_FILENO;
+
+        /* default output stream is stdout */
+        outs->stream = stdout;
+
         /* --etag-save */
         etag_save = &per->etag_save;
         etag_save->stream = stdout;
-        etag_save->config = config;
+
         if(config->etag_save_file) {
           /* open file for output: */
           if(strcmp(config->etag_save_file, "-")) {
@@ -960,19 +971,6 @@ static CURLcode single_transfer(struct GlobalConfig *global,
             fclose(file);
           }
         }
-
-        hdrcbdata = &per->hdrcbdata;
-
-        outs = &per->outs;
-        input = &per->input;
-
-        per->outfile = NULL;
-        per->infdopen = FALSE;
-        per->infd = STDIN_FILENO;
-
-        /* default output stream is stdout */
-        outs->stream = stdout;
-        outs->config = config;
 
         if(metalink) {
           /* For Metalink download, use name in Metalink file as
@@ -1357,6 +1355,9 @@ static CURLcode single_transfer(struct GlobalConfig *global,
                     config->postfieldsize);
           break;
         case HTTPREQ_MIMEPOST:
+          /* free previous remainders */
+          curl_mime_free(config->mimepost);
+          config->mimepost = NULL;
           result = tool2curlmime(curl, config->mimeroot, &config->mimepost);
           if(result)
             break;
@@ -2105,8 +2106,10 @@ static CURLcode parallel_transfers(struct GlobalConfig *global,
 
   result = add_parallel_transfers(global, multi, share,
                                   &more_transfers, &added_transfers);
-  if(result)
+  if(result) {
+    curl_multi_cleanup(multi);
     return result;
+  }
 
   while(!mcode && (still_running || more_transfers)) {
     mcode = curl_multi_poll(multi, NULL, 0, 1000, NULL);

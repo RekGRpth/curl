@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 2004 - 2019, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 2004 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -317,6 +317,9 @@ curl_easy_strerror(CURLcode error)
   case CURLE_HTTP3:
     return "HTTP/3 error";
 
+  case CURLE_QUIC_CONNECT_ERROR:
+    return "QUIC connection error";
+
     /* error codes not used by current libcurl */
   case CURLE_OBSOLETE20:
   case CURLE_OBSOLETE24:
@@ -392,6 +395,9 @@ curl_multi_strerror(CURLMcode error)
   case CURLM_WAKEUP_FAILURE:
     return "Wakeup is unavailable or failed";
 
+  case CURLM_BAD_FUNCTION_ARGUMENT:
+    return "A libcurl function was given a bad argument";
+
   case CURLM_LAST:
     break;
   }
@@ -449,7 +455,9 @@ curl_share_strerror(CURLSHcode error)
 static const char *
 get_winsock_error (int err, char *buf, size_t len)
 {
+#ifndef CURL_DISABLE_VERBOSE_STRINGS
   const char *p;
+#endif
 
   if(!len)
     return NULL;
@@ -457,6 +465,7 @@ get_winsock_error (int err, char *buf, size_t len)
   *buf = '\0';
 
 #ifdef CURL_DISABLE_VERBOSE_STRINGS
+  (void)err;
   return NULL;
 #else
   switch(err) {

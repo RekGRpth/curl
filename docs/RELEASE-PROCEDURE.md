@@ -84,14 +84,14 @@ Coming dates
 Based on the description above, here are some planned release dates (at the
 time of this writing):
 
-- May 22, 2019
-- July 17, 2019
-- September 11, 2019
-- November 6, 2019
-- January 8, 2020 (moved)
-- February 27, 2020
-- April 22, 2020
-- June 17, 2020
+- January 8, 2020
+- March 4, 2020
+- April 29, 2020
+- June 24, 2020
+- August 19, 2020
+- October 14, 2020
+- December 9, 2020
+- February 3, 2021
 
 The above (and more) curl-related dates are published in
 [iCalendar format](https://calendar.google.com/calendar/ical/c9u5d64odop9js55oltfarjk6g%40group.calendar.google.com/public/basic.ics)
