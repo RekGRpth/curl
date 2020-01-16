@@ -337,12 +337,13 @@ static int userauth(byte authtype,
                     void *ctx)
 {
   struct connectdata *conn = ctx;
-  word32 plen = (word32) strlen(conn->passwd);
-  fprintf(stderr, "wolfssh callback: %s type %s\n", __func__,
-          authtype == WOLFSSH_USERAUTH_PASSWORD ? "PASSWORD" :
-          "PUBLICCKEY");
-  authdata->sf.password.password = (byte *)conn->user;
-  authdata->sf.password.passwordSz = plen;
+  DEBUGF(infof(conn->data, "wolfssh callback: type %s\n",
+               authtype == WOLFSSH_USERAUTH_PASSWORD ? "PASSWORD" :
+               "PUBLICCKEY"));
+  if(authtype == WOLFSSH_USERAUTH_PASSWORD) {
+    authdata->sf.password.password = (byte *)conn->passwd;
+    authdata->sf.password.passwordSz = (word32) strlen(conn->passwd);
+  }
 
   return 0;
 }
@@ -898,7 +899,7 @@ static CURLcode wssh_multi_statemach(struct connectdata *conn, bool *done)
     /* if there's no error, it isn't done and it didn't EWOULDBLOCK, then
        try again */
     if(*done) {
-      fprintf(stderr, "%s says DONE\n", __func__);
+      DEBUGF(infof(conn->data, "wssh_statemach_act says DONE\n"));
     }
   } while(!result && !*done && !block);
 
