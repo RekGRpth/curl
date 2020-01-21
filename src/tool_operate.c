@@ -871,7 +871,8 @@ static CURLcode single_transfer(struct GlobalConfig *global,
         if(config->headerfile) {
           /* open file for output: */
           if(strcmp(config->headerfile, "-")) {
-            FILE *newfile = fopen(config->headerfile, "wb");
+            FILE *newfile;
+            newfile = fopen(config->headerfile, per->prev == NULL?"wb":"ab");
             if(!newfile) {
               warnf(config->global, "Failed to open %s\n", config->headerfile);
               result = CURLE_WRITE_ERROR;
@@ -1833,6 +1834,10 @@ static CURLcode single_transfer(struct GlobalConfig *global,
 
         if(config->mail_rcpt)
           my_setopt_slist(curl, CURLOPT_MAIL_RCPT, config->mail_rcpt);
+
+        /* curl 7.69.x */
+        my_setopt(curl, CURLOPT_MAIL_RCPT_ALLLOWFAILS,
+          config->mail_rcpt_allowfails ? 1L : 0L);
 
         /* curl 7.20.x */
         if(config->ftp_pret)

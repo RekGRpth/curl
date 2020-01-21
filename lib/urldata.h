@@ -7,7 +7,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2019, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -906,7 +906,6 @@ struct connectdata {
   char *passwd;  /* password string, allocated */
   char *options; /* options string, allocated */
 
-  char *oauth_bearer;     /* bearer token for OAuth 2.0, allocated */
   char *sasl_authzid;     /* authorisation identity string, allocated */
 
   int httpversion;        /* the HTTP version*10 reported by the server */
@@ -1792,6 +1791,8 @@ struct UserDefined {
   BIT(doh); /* DNS-over-HTTPS enabled */
   BIT(doh_get); /* use GET for DoH requests, instead of POST */
   BIT(http09_allowed); /* allow HTTP/0.9 responses */
+  BIT(mail_rcpt_allowfails); /* allow RCPT TO command to fail for some
+                                recipients */
 };
 
 struct Names {
