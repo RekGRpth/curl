@@ -370,6 +370,7 @@ struct Curl_multi *Curl_multi_handle(int hashsize, /* socket hash */
   /* -1 means it not set by user, use the default value */
   multi->maxconnects = -1;
   multi->max_concurrent_streams = 100;
+  multi->ipv6_works = Curl_ipv6works(NULL);
 
 #ifdef ENABLE_WAKEUP
   if(Curl_socketpair(AF_UNIX, SOCK_STREAM, 0, multi->wakeup_pair) < 0) {
@@ -591,6 +592,9 @@ static CURLcode multi_done(struct Curl_easy *data,
   detach_connnection(data);
   if(CONN_INUSE(conn)) {
     /* Stop if still used. */
+    /* conn->data must not remain pointing to this transfer since it is going
+       away! Find another to own it! */
+    conn->data = conn->easyq.head->ptr;
     CONN_UNLOCK(data);
     DEBUGF(infof(data, "Connection still in use %zu, "
                  "no more multi_done now!\n",
