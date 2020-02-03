@@ -1273,7 +1273,7 @@ ConnectionExists(struct Curl_easy *data,
              needle->conn_to_port == check->conn_to_port) &&
            strcasecompare(needle->host.name, check->host.name) &&
            needle->remote_port == check->remote_port) {
-          /* The schemes match or the the protocol family is the same and the
+          /* The schemes match or the protocol family is the same and the
              previous connection was TLS upgraded, and the hostname and host
              port match */
           if(needle->handler->flags & PROTOPT_SSL) {
@@ -1656,7 +1656,8 @@ static struct connectdata *allocate_conn(struct Curl_easy *data)
 
 #if !defined(CURL_DISABLE_HTTP) && defined(USE_NTLM) && \
     defined(NTLM_WB_ENABLED)
-  conn->ntlm_auth_hlpr_socket = CURL_SOCKET_BAD;
+  conn->ntlm.ntlm_auth_hlpr_socket = CURL_SOCKET_BAD;
+  conn->proxyntlm.ntlm_auth_hlpr_socket = CURL_SOCKET_BAD;
 #endif
 
   /* Initialize the easy handle list */
