@@ -422,7 +422,7 @@ void parse_cert_parameter(const char *cert_parameter,
       /* escaped colons and Windows drive letter colons were handled
        * above; if we're still here, this is a separating colon */
       param_place++;
-      if(strlen(param_place) > 0) {
+      if(*param_place) {
         *passphrase = strdup(param_place);
       }
       goto done;
@@ -1278,7 +1278,10 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
     case 'b':
       switch(subletter) {
       case 'a': /* --alt-svc */
-        GetStr(&config->altsvc, nextarg);
+        if(curlinfo->features & CURL_VERSION_ALTSVC)
+          GetStr(&config->altsvc, nextarg);
+        else
+          return PARAM_LIBCURL_DOESNT_SUPPORT;
         break;
       default:  /* --cookie string coming up: */
         if(nextarg[0] == '@') {
