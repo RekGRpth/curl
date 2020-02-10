@@ -253,18 +253,6 @@ static void freedirs(struct ftp_conn *ftpc)
   Curl_safefree(ftpc->newhost);
 }
 
-/* Returns non-zero if the given string contains CR (\r) or LF (\n),
-   which are not allowed within RFC 959 <string>.
-   Note: The input string is in the client's encoding which might
-   not be ASCII, so escape sequences \r & \n must be used instead
-   of hex values 0x0d & 0x0a.
-*/
-static bool isBadFtpString(const char *string)
-{
-  return ((NULL != strchr(string, '\r')) ||
-          (NULL != strchr(string, '\n'))) ? TRUE : FALSE;
-}
-
 /***********************************************************************
  *
  * AcceptServerConnect()
@@ -785,9 +773,8 @@ static void _state(struct connectdata *conn,
 static CURLcode ftp_state_user(struct connectdata *conn)
 {
   CURLcode result;
-  struct FTP *ftp = conn->data->req.protop;
   /* send USER */
-  PPSENDF(&conn->proto.ftpc.pp, "USER %s", ftp->user?ftp->user:"");
+  PPSENDF(&conn->proto.ftpc.pp, "USER %s", conn->user?conn->user:"");
 
   state(conn, FTP_USER);
   conn->data->state.ftp_trying_alternative = FALSE;
@@ -2529,7 +2516,6 @@ static CURLcode ftp_state_user_resp(struct connectdata *conn,
 {
   CURLcode result = CURLE_OK;
   struct Curl_easy *data = conn->data;
-  struct FTP *ftp = data->req.protop;
   struct ftp_conn *ftpc = &conn->proto.ftpc;
   (void)instate; /* no use for this yet */
 
@@ -2537,7 +2523,7 @@ static CURLcode ftp_state_user_resp(struct connectdata *conn,
   if((ftpcode == 331) && (ftpc->state == FTP_USER)) {
     /* 331 Password required for ...
        (the server requires to send the user's password too) */
-    PPSENDF(&ftpc->pp, "PASS %s", ftp->passwd?ftp->passwd:"");
+    PPSENDF(&ftpc->pp, "PASS %s", conn->passwd?conn->passwd:"");
     state(conn, FTP_PASS);
   }
   else if(ftpcode/100 == 2) {
@@ -4370,18 +4356,6 @@ static CURLcode ftp_setup_connection(struct connectdata *conn)
   /* get some initial data into the ftp struct */
   ftp->transfer = FTPTRANSFER_BODY;
   ftp->downloadsize = 0;
-
-  /* No need to duplicate user+password, the connectdata struct won't change
-     during a session, but we re-init them here since on subsequent inits
-     since the conn struct may have changed or been replaced.
-  */
-  ftp->user = conn->user;
-  ftp->passwd = conn->passwd;
-  if(isBadFtpString(ftp->user))
-    return CURLE_URL_MALFORMAT;
-  if(isBadFtpString(ftp->passwd))
-    return CURLE_URL_MALFORMAT;
-
   conn->proto.ftpc.known_filesize = -1; /* unknown size for now */
 
   return CURLE_OK;
