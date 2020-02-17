@@ -87,6 +87,8 @@
 
  10. LDAP
  10.1 SASL based authentication mechanisms
+ 10.2 CURLOPT_SSL_CTX_FUNCTION for LDAPS
+ 10.3 Paged searches on LDAP server
 
  11. SMB
  11.1 File listing support
@@ -403,7 +405,6 @@
  EWOULDBLOCK or similar. Blocking cases include:
 
  - Name resolves on non-windows unless c-ares or the threaded resolver is used
- - SOCKS proxy handshakes
  - file:// transfers
  - TELNET transfers
  - The "DONE" operation (post transfer protocol-specific actions) for the
@@ -602,6 +603,17 @@
  using the simple authentication mechanism (as clear text). However, it should
  be possible to use ldap_bind_s() instead specifying the security context
  information ourselves.
+
+10.2 CURLOPT_SSL_CTX_FUNCTION for LDAPS
+
+ CURLOPT_SSL_CTX_FUNCTION works perfectly for HTTPS and email protocols, but
+ it has no effect for LDAPS connections.
+
+ https://github.com/curl/curl/issues/4108
+
+10.3 Paged searches on LDAP server
+
+ https://github.com/curl/curl/issues/4452
 
 11. SMB
 

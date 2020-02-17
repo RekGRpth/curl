@@ -47,6 +47,7 @@
 #include "http_proxy.h"
 #include "http2.h"
 #include "socketpair.h"
+#include "socks.h"
 /* The last 3 #include files should be in this order */
 #include "curl_printf.h"
 #include "curl_memory.h"
@@ -855,6 +856,9 @@ static int waitconnect_getsock(struct connectdata *conn,
   if(CONNECT_FIRSTSOCKET_PROXY_SSL())
     return Curl_ssl_getsock(conn, sock);
 #endif
+
+  if(SOCKS_STATE(conn->cnnct.state))
+    return Curl_SOCKS_getsock(conn, sock, FIRSTSOCKET);
 
   for(i = 0; i<2; i++) {
     if(conn->tempsock[i] != CURL_SOCKET_BAD) {
@@ -2191,8 +2195,13 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
           }
         }
       }
-      else if(comeback)
-        rc = CURLM_CALL_MULTI_PERFORM;
+      else if(comeback) {
+        /* This avoids CURLM_CALL_MULTI_PERFORM so that a very fast transfer
+           won't get stuck on this transfer at the expense of other concurrent
+           transfers */
+        Curl_expire(data, 0, EXPIRE_RUN_NOW);
+        rc = CURLM_OK;
+      }
       break;
     }
 
