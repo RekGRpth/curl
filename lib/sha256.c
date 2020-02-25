@@ -5,7 +5,8 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2019, Florin Petriuc, <petriuc.florin@gmail.com>
+ * Copyright (C) 2017, Florin Petriuc, <petriuc.florin@gmail.com>
+ * Copyright (C) 2018 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -255,12 +256,16 @@ static int SHA256_Final(unsigned char *out,
 
 #endif
 
-void Curl_sha256it(unsigned char *outbuffer, /* 32 unsigned chars */
-                   const unsigned char *input)
+/*
+ * @unittest: 1610
+ */
+void Curl_sha256it(unsigned char *outbuffer, const unsigned char *input,
+                   const size_t len)
 {
   SHA256_CTX ctx;
+
   SHA256_Init(&ctx);
-  SHA256_Update(&ctx, input, curlx_uztoui(strlen((char *)input)));
+  SHA256_Update(&ctx, input, curlx_uztoui(len));
   SHA256_Final(outbuffer, &ctx);
 }
 
