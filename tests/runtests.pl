@@ -164,7 +164,7 @@ my $UNITDIR="./unit";
 my $SERVERIN="$LOGDIR/server.input"; # what curl sent the server
 my $SERVER2IN="$LOGDIR/server2.input"; # what curl sent the second server
 my $PROXYIN="$LOGDIR/proxy.input"; # what curl sent the proxy
-my $CURLLOG="$LOGDIR/curl.log"; # all command lines run
+my $CURLLOG="commands.log"; # all command lines run
 my $FTPDCMD="$LOGDIR/ftpserver.cmd"; # copy ftp server instructions here
 my $SERVERLOGS_LOCK="$LOGDIR/serverlogs.lock"; # server logs advisor read lock
 my $CURLCONFIG="../curl-config"; # curl-config from current build
@@ -296,7 +296,8 @@ my %timevrfyend; # timestamp for each test result verification end
 
 my $testnumcheck; # test number, set in singletest sub.
 my %oldenv;
-my %feature; # array of enabled features
+my %feature;      # array of enabled features
+my %keywords;     # array of keywords from the test spec
 
 #######################################################################
 # variables that command line options may set
@@ -2560,7 +2561,7 @@ sub cleardir {
     opendir(DIR, $dir) ||
         return 0; # can't open dir
     while($file = readdir(DIR)) {
-        if($file !~ /^\./) {
+        if(($file !~ /^\./) && ($file ne $CURLLOG)) {
             unlink("$dir/$file");
             $count++;
         }
@@ -3306,21 +3307,26 @@ sub singletest {
     }
 
     if(!$why) {
-        my @keywords = getpart("info", "keywords");
+        my @info_keywords = getpart("info", "keywords");
         my $match;
         my $k;
 
-        if(!$keywords[0]) {
+        # Clear the list of keywords from the last test
+        %keywords = ();
+
+        if(!$info_keywords[0]) {
             $why = "missing the <keywords> section!";
         }
 
-        for $k (@keywords) {
+        for $k (@info_keywords) {
             chomp $k;
             if ($disabled_keywords{lc($k)}) {
                 $why = "disabled by keyword";
             } elsif ($enabled_keywords{lc($k)}) {
                 $match = 1;
             }
+
+            $keywords{$k} = 1;
         }
 
         if(!$why && !$match && %enabled_keywords) {
@@ -3616,7 +3622,7 @@ sub singletest {
         $tool=$CMDLINE;
         $disablevalgrind=1;
     }
-    elsif(!$tool) {
+    elsif(!$tool && !$keywords{"unittest"}) {
         # run curl, add suitable command line options
         my $inc="";
         if((!$cmdhash{'option'}) || ($cmdhash{'option'} !~ /no-include/)) {
@@ -3635,6 +3641,11 @@ sub singletest {
     else {
         $cmdargs = " $cmd"; # $cmd is the command line for the test file
         $CURLOUT = $STDOUT; # sends received data to stdout
+
+        # Default the tool to a unit test with the same name as the test spec
+        if($keywords{"unittest"} && !$tool) {
+            $tool="unit$testnum";
+        }
 
         if($tool =~ /^lib/) {
             $CMDLINE="$LIBDIR/$tool";
@@ -5394,7 +5405,7 @@ if($scrambleorder) {
 #######################################################################
 # Start the command line log
 #
-open(CMDLOG, ">$CURLLOG") ||
+open(CMDLOG, ">", "$LOGDIR/$CURLLOG") ||
     logmsg "can't log command lines to $CURLLOG\n";
 
 #######################################################################
