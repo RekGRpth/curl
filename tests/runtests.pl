@@ -253,7 +253,6 @@ my $has_openssl;    # built with a lib using an OpenSSL-like API
 my $has_gnutls;     # built with GnuTLS
 my $has_nss;        # built with NSS
 my $has_wolfssl;    # built with wolfSSL
-my $has_polarssl;   # built with polarssl
 my $has_winssl;     # built with WinSSL    (Secure Channel aka Schannel)
 my $has_darwinssl;  # built with DarwinSSL (Secure Transport)
 my $has_boringssl;  # built with BoringSSL
@@ -482,7 +481,7 @@ sub startnew {
             logmsg "startnew: failed to write fake $pidfile with pid=$child\n";
         }
         # could/should do a while connect fails sleep a bit and loop
-        sleep $timeout;
+        portable_sleep($timeout);
         if (checkdied($child)) {
             logmsg "startnew: child process has failed to start\n" if($verbose);
             return (-1,-1);
@@ -2745,10 +2744,6 @@ sub checksystem {
                $has_wolfssl=1;
                $has_sslpinning=1;
            }
-           elsif ($libcurl =~ /polarssl/i) {
-               $has_polarssl=1;
-               $has_sslpinning=1;
-           }
            elsif ($libcurl =~ /securetransport/i) {
                $has_darwinssl=1;
                $has_sslpinning=1;
@@ -3823,7 +3818,7 @@ sub singletest {
     if($serverlogslocktimeout) {
         my $lockretry = $serverlogslocktimeout * 20;
         while((-f $SERVERLOGS_LOCK) && $lockretry--) {
-            select(undef, undef, undef, 0.05);
+            portable_sleep(0.05);
         }
         if(($lockretry < 0) &&
            ($serverlogslocktimeout >= $defserverlogslocktimeout)) {
@@ -3840,7 +3835,7 @@ sub singletest {
     # based tests might need a small delay once that the client command has
     # run to avoid false test failures.
 
-    sleep($postcommanddelay) if($postcommanddelay);
+    portable_sleep($postcommanddelay) if($postcommanddelay);
 
     # timestamp removal of server logs advisor read lock
     $timesrvrlog{$testnum} = Time::HiRes::time();
@@ -5588,7 +5583,13 @@ foreach $testnum (@at) {
     $total++; # number of tests we've run
 
     if($error>0) {
-        $failed.= "$testnum ";
+        if($error==2) {
+            # ignored test failures are wrapped in ()
+            $failed.= "($testnum) ";
+        }
+        else {
+            $failed.= "$testnum ";
+        }
         if($postmortem) {
             # display all files in log/ in a nice way
             displaylogs($testnum);
