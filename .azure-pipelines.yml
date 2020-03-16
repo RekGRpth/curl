@@ -4,8 +4,16 @@
 # https://aka.ms/yaml
 
 trigger:
-- 'master'
-- '*/ci'
+  branches:
+    include:
+    - 'master'
+    - '*/ci'
+
+pr:
+  branches:
+    include:
+    - 'master'
+    - '*/ci'
 
 stages:
 
@@ -22,6 +30,9 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - script: sudo apt install stunnel4 python-impacket
+      displayName: 'apt install'
+
     - script: ./buildconf && ./configure --enable-debug --enable-werror
       displayName: 'configure debug'
 
@@ -32,6 +43,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~323"
 
   - job: disable_ipv6
     displayName: ubuntu w/o IPv6
@@ -39,6 +51,9 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - script: sudo apt install stunnel4 python-impacket
+      displayName: 'apt install'
+
     - script: ./buildconf && ./configure --disable-ipv6
       displayName: 'configure disable ipv6'
 
@@ -49,6 +64,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~323"
 
   - job: disable_http_smtp_imap
     displayName: ubuntu w/o HTTP/SMTP/IMAP
@@ -56,6 +72,9 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - script: sudo apt install stunnel4 python-impacket
+      displayName: 'apt install'
+
     - script: ./buildconf && ./configure --disable-http --disable-smtp --disable-imap
       displayName: 'configure disable http/smtp/imap'
 
@@ -73,6 +92,9 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - script: sudo apt install stunnel4 python-impacket
+      displayName: 'apt install'
+
     - script: ./buildconf && ./configure --disable-threaded-resolver
       displayName: 'configure disable threaded-resolver'
 
@@ -83,6 +105,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~323"
 
   - job: http_only
     displayName: ubuntu HTTP only
@@ -90,6 +113,9 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
+    - script: sudo apt install stunnel4 python-impacket
+      displayName: 'apt install'
+
     - script: ./buildconf && ./configure --disable-dict --disable-file --disable-ftp --disable-gopher --disable-imap --disable-ldap --disable-pop3 --disable-rtmp --disable-rtsp --disable-scp --disable-sftp --disable-smb --disable-smtp --disable-telnet --disable-tftp
       displayName: 'configure disable non-http'
 
@@ -100,6 +126,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~323"
 
 - stage: linux_torture
   dependsOn: linux
@@ -110,7 +137,7 @@ stages:
     pool:
       vmImage: 'ubuntu-latest'
     steps:
-    - script: sudo apt install libnghttp2-dev
+    - script: sudo apt install stunnel4 python-impacket libnghttp2-dev
       displayName: 'apt install'
 
     - script: ./buildconf && ./configure --enable-debug --disable-shared --disable-threaded-resolver --enable-alt-svc
@@ -119,8 +146,10 @@ stages:
     - script: make
       displayName: 'make'
 
-    - script: make "TFLAGS=-n -t --shallow=40 '!FTP'" test-nonflaky
+    - script: make test-nonflaky
       displayName: 'torture test'
+      env:
+        TFLAGS: "-n -t --shallow=40 !FTP ~323"
 
 ##########################################
 ### macOS jobs below
@@ -199,8 +228,10 @@ stages:
     - script: make
       displayName: 'make'
 
-    - script: make "TFLAGS=-n -t --shallow=25 '!FTP'" test-nonflaky
+    - script: make test-nonflaky
       displayName: 'torture test'
+      env:
+        TFLAGS: "-n -t --shallow=25 !FTP"
 
 ##########################################
 ### Windows jobs below
@@ -219,7 +250,6 @@ stages:
       env:
         MSYSTEM: MINGW32
         MSYS2_PATH_TYPE: inherit
-        TFLAGS: "~323 ~1056 ~1299"
     steps:
     - script: C:\msys64\usr\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=i686-w64-mingw32 --build=i686-w64-mingw32 --enable-debug --enable-werror"
       displayName: 'configure debug'
@@ -231,6 +261,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~323 ~1056 ~1299"
 
   - job: windows_msys2_mingw64_debug_openssl
     displayName: msys2 mingw64 debug openssl
@@ -242,7 +273,6 @@ stages:
       env:
         MSYSTEM: MINGW64
         MSYS2_PATH_TYPE: inherit
-        TFLAGS: "~323 ~1056 ~1299"
     steps:
     - script: C:\msys64\usr\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=x86_64-w64-mingw32 --build=x86_64-w64-mingw32 --enable-debug --enable-werror"
       displayName: 'configure debug'
@@ -254,6 +284,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~323 ~1056 ~1299"
 
   - job: windows_msys1_mingw_debug_openssl
     displayName: msys1 mingw debug openssl
@@ -262,8 +293,6 @@ stages:
       vmImage: 'windows-2019'
     container:
       image: mback2k/curl-docker-winbuildenv-msys1-mingw:ltsc2019
-      env:
-        TFLAGS: "~203 ~1056 ~1143"
     steps:
     - script: C:\MinGW\msys\1.0\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=i686-pc-mingw32 --build=i686-pc-mingw32 --prefix=/mingw --enable-debug"
       displayName: 'configure debug'
@@ -275,6 +304,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~203 ~1056 ~1143"
 
   - job: windows_msys1_mingw32_debug_openssl
     displayName: msys1 mingw32 debug openssl
@@ -283,8 +313,6 @@ stages:
       vmImage: 'windows-2019'
     container:
       image: mback2k/curl-docker-winbuildenv-msys1-mingw32:ltsc2019
-      env:
-        TFLAGS: "~203 ~1056 ~1143 ~1299"
     steps:
     - script: C:\MinGW\msys\1.0\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=i686-w64-mingw32 --build=i686-w64-mingw32 --prefix=/mingw32 --enable-debug --enable-werror --without-zlib"
       displayName: 'configure debug without zlib'
@@ -296,6 +324,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~203 ~1056 ~1143 ~1299"
 
   - job: windows_msys1_mingw64_debug_openssl
     displayName: msys1 mingw64 debug openssl
@@ -304,8 +333,6 @@ stages:
       vmImage: 'windows-2019'
     container:
       image: mback2k/curl-docker-winbuildenv-msys1-mingw64:ltsc2019
-      env:
-        TFLAGS: "~203 ~1056 ~1143 ~1299"
     steps:
     - script: C:\MinGW\msys\1.0\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=x86_64-w64-mingw32 --build=x86_64-w64-mingw32 --prefix=/mingw64 --enable-debug --enable-werror --without-zlib"
       displayName: 'configure debug without zlib'
@@ -317,6 +344,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~203 ~1056 ~1143 ~1299"
 
   - job: windows_msys2_mingw32_debug_schannel
     displayName: msys2 mingw32 debug schannel
@@ -328,7 +356,6 @@ stages:
       env:
         MSYSTEM: MINGW32
         MSYS2_PATH_TYPE: inherit
-        TFLAGS: "~165 ~310 ~1013 ~1056 ~1299 ~1448 ~2034 ~2037 ~2041 ~2046 ~2047 ~3000 ~3001"
     steps:
     - script: C:\msys64\usr\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=i686-w64-mingw32 --build=i686-w64-mingw32 --enable-debug --enable-werror --enable-sspi --without-ssl --with-schannel --with-winidn"
       displayName: 'configure debug with sspi/schannel/winidn'
@@ -340,6 +367,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~165 ~310 ~1013 ~1056 ~1299 ~1448 ~2034 ~2037 ~2041 ~2046 ~2047 ~3000 ~3001"
 
   - job: windows_msys2_mingw64_debug_schannel
     displayName: msys2 mingw64 debug schannel
@@ -351,7 +379,6 @@ stages:
       env:
         MSYSTEM: MINGW64
         MSYS2_PATH_TYPE: inherit
-        TFLAGS: "~165 ~310 ~1013 ~1056 ~1299 ~1448 ~2034 ~2037 ~2041 ~2046 ~2047 ~3000 ~3001"
     steps:
     - script: C:\msys64\usr\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=x86_64-w64-mingw32 --build=x86_64-w64-mingw32 --enable-debug --enable-werror --enable-sspi --without-ssl --with-schannel --with-winidn"
       displayName: 'configure debug with sspi/schannel/winidn'
@@ -363,6 +390,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~165 ~310 ~1013 ~1056 ~1299 ~1448 ~2034 ~2037 ~2041 ~2046 ~2047 ~3000 ~3001"
 
   - job: windows_msys1_mingw_debug_schannel
     displayName: msys1 mingw debug schannel
@@ -371,8 +399,6 @@ stages:
       vmImage: 'windows-2019'
     container:
       image: mback2k/curl-docker-winbuildenv-msys1-mingw:ltsc2019
-      env:
-        TFLAGS: "~203 ~305 ~310 ~311 ~312 ~313 ~404 ~1013 ~1056 ~1143 ~2034 ~2035 ~2037 ~2038 ~2041 ~2042 ~2048 ~3000 ~3001"
     steps:
     - script: C:\MinGW\msys\1.0\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=i686-pc-mingw32 --build=i686-pc-mingw32 --prefix=/mingw --enable-debug --enable-sspi --without-ssl --with-schannel --with-winidn"
       displayName: 'configure debug with sspi/schannel/winidn'
@@ -384,6 +410,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~203 ~305 ~310 ~311 ~312 ~313 ~404 ~1013 ~1056 ~1143 ~2034 ~2035 ~2037 ~2038 ~2041 ~2042 ~2048 ~3000 ~3001"
 
   - job: windows_msys1_mingw32_debug_schannel
     displayName: msys1 mingw32 debug schannel
@@ -392,8 +419,6 @@ stages:
       vmImage: 'windows-2019'
     container:
       image: mback2k/curl-docker-winbuildenv-msys1-mingw32:ltsc2019
-      env:
-        TFLAGS: "~203 ~310 ~1013 ~1056 ~1143 ~1299 ~2034 ~2037 ~2041 ~3000 ~3001"
     steps:
     - script: C:\MinGW\msys\1.0\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=i686-w64-mingw32 --build=i686-w64-mingw32 --prefix=/mingw32 --enable-debug --enable-werror --enable-sspi --without-ssl --with-schannel --with-winidn --without-zlib"
       displayName: 'configure debug with sspi/schannel/winidn without zlib'
@@ -405,6 +430,7 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~203 ~310 ~1013 ~1056 ~1143 ~1299 ~2034 ~2037 ~2041 ~3000 ~3001"
 
   - job: windows_msys1_mingw64_debug_schannel
     displayName: msys1 mingw64 debug schannel
@@ -413,8 +439,6 @@ stages:
       vmImage: 'windows-2019'
     container:
       image: mback2k/curl-docker-winbuildenv-msys1-mingw64:ltsc2019
-      env:
-        TFLAGS: "~203 ~310 ~1013 ~1056 ~1143 ~1299 ~2034 ~2037 ~2041 ~3000 ~3001"
     steps:
     - script: C:\MinGW\msys\1.0\bin\sh -l -c "cd $(echo '%cd%') && ./buildconf && ./configure --host=x86_64-w64-mingw32 --build=x86_64-w64-mingw32 --prefix=/mingw64  --enable-debug --enable-werror --enable-sspi --without-ssl --with-schannel --with-winidn --without-zlib"
       displayName: 'configure debug with sspi/schannel/winidn without zlib'
@@ -426,3 +450,4 @@ stages:
       displayName: 'test'
       env:
         AZURE_ACCESS_TOKEN: "$(System.AccessToken)"
+        TFLAGS: "~203 ~310 ~1013 ~1056 ~1143 ~1299 ~2034 ~2037 ~2041 ~3000 ~3001"
