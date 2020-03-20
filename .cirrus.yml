@@ -17,7 +17,11 @@ task:
 
   pkginstall_script:
     - pkg update -f
-    - pkg install -y autoconf automake libtool pkgconf brotli openldap-client heimdal libpsl libmetalink libssh2 openssh-portable libidn2 librtmp libnghttp2 nghttp2 stunnel py27-impacket
+    - pkg install -y autoconf automake libtool pkgconf brotli openldap-client heimdal libpsl libmetalink libssh2 openssh-portable libidn2 librtmp libnghttp2 nghttp2 stunnel
+    - case `python -V` in
+        Python?3.7*) pkg install -y py37-impacket ;;
+        Python?2.7*) pkg install -y py27-impacket ;;
+      esac
     - pkg delete -y curl
   configure_script:
     - ./buildconf
@@ -44,8 +48,8 @@ task:
     - SKIP_TESTS=''
     - uname -r
     - case `uname -r` in
-        13.0*) SKIP_TESTS='!323 !1242 !1243 !2002 !2003';;
-        12.1*) SKIP_TESTS='!323 !1242 !1243 !2002 !2003';;
+        13.0*) SKIP_TESTS='!1242 !1243 !2002 !2003';;
+        12.1*) SKIP_TESTS='!1242 !1243 !2002 !2003';;
         11.3*) SKIP_TESTS='!504 !1242 !1243 !2002 !2003';;
         10.4*) SKIP_TESTS='!310 !311 !312 !313 !1082 !1242 !1243 !2002 !2003 !2034 !2035 !2037 !2038 !2041 !2042 !2048 !3000 !3001';;
       esac

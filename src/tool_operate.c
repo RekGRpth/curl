@@ -1898,9 +1898,11 @@ static CURLcode single_transfer(struct GlobalConfig *global,
           my_setopt_str(curl, CURLOPT_GSSAPI_DELEGATION,
                         config->gssapi_delegation);
 
-        /* new in 7.25.0 and 7.44.0 */
+        /* new in 7.25.0, 7.44.0 and 7.70.0 */
         {
           long mask = (config->ssl_allow_beast ? CURLSSLOPT_ALLOW_BEAST : 0) |
+                      (config->ssl_revoke_best_effort ?
+                       CURLSSLOPT_REVOKE_BEST_EFFORT : 0) |
                       (config->ssl_no_revoke ? CURLSSLOPT_NO_REVOKE : 0);
           if(mask)
             my_setopt_bitmask(curl, CURLOPT_SSL_OPTIONS, mask);
@@ -2055,7 +2057,7 @@ static CURLcode add_parallel_transfers(struct GlobalConfig *global,
   *addedp = FALSE;
   *morep = FALSE;
   result = create_transfer(global, share, addedp);
-  if(result || !*addedp)
+  if(result)
     return result;
   for(per = transfers; per && (all_added < global->parallel_max);
       per = per->next) {
