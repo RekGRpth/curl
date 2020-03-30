@@ -390,9 +390,6 @@ static curl_version_info_data version_info = {
 #if defined(USE_ALTSVC)
   | CURL_VERSION_ALTSVC
 #endif
-#ifdef USE_ESNI
-  | CURL_VERSION_ESNI
-#endif
   ,
   NULL, /* ssl_version */
   0,    /* ssl_version_num, this is kept at zero */
@@ -407,7 +404,17 @@ static curl_version_info_data version_info = {
   NULL, /* brotli version */
   0,    /* nghttp2 version number */
   NULL, /* nghttp2 version string */
-  NULL  /* quic library string */
+  NULL, /* quic library string */
+#ifdef CURL_CA_BUNDLE
+  CURL_CA_BUNDLE, /* cainfo */
+#else
+  NULL,
+#endif
+#ifdef CURL_CA_PATH
+  CURL_CA_PATH  /* capath */
+#else
+  NULL
+#endif
 };
 
 curl_version_info_data *curl_version_info(CURLversion stamp)

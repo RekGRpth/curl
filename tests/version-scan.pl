@@ -1,3 +1,4 @@
+#!/usr/bin/env perl
 #***************************************************************************
 #                                  _   _ ____  _
 #  Project                     ___| | | |  _ \| |
@@ -5,7 +6,7 @@
 #                            | (__| |_| |  _ <| |___
 #                             \___|\___/|_| \_\_____|
 #
-# Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
+# Copyright (C) 2010 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
 #
 # This software is licensed as described in the file COPYING, which
 # you should have received as part of this distribution. The terms
@@ -19,17 +20,47 @@
 # KIND, either express or implied.
 #
 ###########################################################################
+#
+# Verify that curl_version_info.3 documents all the CURL_VERSION_ bits
+# from the header.
+#
 
-AUTOMAKE_OPTIONS = foreign no-dependencies
+use strict;
+use warnings;
 
-MANPAGE = $(top_builddir)/docs/curl.1
+my $manpage=$ARGV[0];
+my $header=$ARGV[1];
+my %manversion;
+my %headerversion;
+my $error;
 
-include Makefile.inc
+open(M, "<$manpage");
+while(<M>) {
+    if($_ =~ /^.ip (CURL_VERSION_[A-Z0-9_]+)/i) {
+        $manversion{$1}++;
+    }
+}
+close(M);
 
-EXTRA_DIST = $(DPAGES) MANPAGE.md gen.pl $(OTHERPAGES) CMakeLists.txt
+open(H, "<$header");
+while(<H>) {
+    if($_ =~ /^\#define (CURL_VERSION_[A-Z0-9_]+)/i) {
+        $headerversion{$1}++;
+    }
+}
+close(H);
 
-all: $(MANPAGE)
+for my $h (keys %headerversion) {
+    if(!$manversion{$h}) {
+        print STDERR "$manpage: missing $h\n";
+        $error++;
+    }
+}
+for my $h (keys %manversion) {
+    if(!$headerversion{$h}) {
+        print STDERR "$manpage: $h is not in the header!\n";
+        $error++;
+    }
+}
 
-$(MANPAGE): $(DPAGES) $(OTHERPAGES) Makefile.inc
-	@echo "generate $(MANPAGE)"
-	@(cd $(srcdir) && @PERL@ ./gen.pl mainpage $(DPAGES)) > $(MANPAGE)
+exit $error;

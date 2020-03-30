@@ -2730,6 +2730,7 @@ typedef enum {
   CURLVERSION_FOURTH,
   CURLVERSION_FIFTH,
   CURLVERSION_SIXTH,
+  CURLVERSION_SEVENTH,
   CURLVERSION_LAST /* never actually use this */
 } CURLversion;
 
@@ -2738,7 +2739,7 @@ typedef enum {
    meant to be a built-in version number for what kind of struct the caller
    expects. If the struct ever changes, we redefine the NOW to another enum
    from above. */
-#define CURLVERSION_NOW CURLVERSION_SIXTH
+#define CURLVERSION_NOW CURLVERSION_SEVENTH
 
 typedef struct {
   CURLversion age;          /* age of the returned struct */
@@ -2777,6 +2778,13 @@ typedef struct {
   const char *nghttp2_version; /* human readable string. */
   const char *quic_version;    /* human readable quic (+ HTTP/3) library +
                                   version or NULL */
+
+  /* These fields were added in CURLVERSION_SEVENTH */
+  const char *cainfo;          /* the built-in default CURLOPT_CAINFO, might
+                                  be NULL */
+  const char *capath;          /* the built-in default CURLOPT_CAPATH, might
+                                  be NULL */
+
 } curl_version_info_data;
 
 #define CURL_VERSION_IPV6         (1<<0)  /* IPv6-enabled */
@@ -2810,8 +2818,6 @@ typedef struct {
 #define CURL_VERSION_BROTLI       (1<<23) /* Brotli features are present. */
 #define CURL_VERSION_ALTSVC       (1<<24) /* Alt-Svc handling built-in */
 #define CURL_VERSION_HTTP3        (1<<25) /* HTTP3 support built-in */
-
-#define CURL_VERSION_ESNI         (1<<26) /* ESNI support */
 
  /*
  * NAME curl_version_info()
