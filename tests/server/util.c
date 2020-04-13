@@ -509,3 +509,278 @@ long timediff(struct timeval newer, struct timeval older)
   return (long)(newer.tv_sec-older.tv_sec)*1000+
     (long)(newer.tv_usec-older.tv_usec)/1000;
 }
+
+/* do-nothing macro replacement for systems which lack siginterrupt() */
+
+#ifndef HAVE_SIGINTERRUPT
+#define siginterrupt(x,y) do {} while(0)
+#endif
+
+/* vars used to keep around previous signal handlers */
+
+typedef RETSIGTYPE (*SIGHANDLER_T)(int);
+
+#ifdef SIGHUP
+static SIGHANDLER_T old_sighup_handler  = SIG_ERR;
+#endif
+
+#ifdef SIGPIPE
+static SIGHANDLER_T old_sigpipe_handler = SIG_ERR;
+#endif
+
+#ifdef SIGALRM
+static SIGHANDLER_T old_sigalrm_handler = SIG_ERR;
+#endif
+
+#ifdef SIGINT
+static SIGHANDLER_T old_sigint_handler  = SIG_ERR;
+#endif
+
+#ifdef SIGTERM
+static SIGHANDLER_T old_sigterm_handler = SIG_ERR;
+#endif
+
+#if defined(SIGBREAK) && defined(WIN32)
+static SIGHANDLER_T old_sigbreak_handler = SIG_ERR;
+#endif
+
+#ifdef WIN32
+static DWORD thread_main_id = 0;
+static HANDLE thread_main_window = NULL;
+static HWND hidden_main_window = NULL;
+#endif
+
+/* var which if set indicates that the program should finish execution */
+volatile int got_exit_signal = 0;
+
+/* if next is set indicates the first signal handled in exit_signal_handler */
+volatile int exit_signal = 0;
+
+/* signal handler that will be triggered to indicate that the program
+ * should finish its execution in a controlled manner as soon as possible.
+ * The first time this is called it will set got_exit_signal to one and
+ * store in exit_signal the signal that triggered its execution.
+ */
+static RETSIGTYPE exit_signal_handler(int signum)
+{
+  int old_errno = errno;
+  logmsg("exit_signal_handler: %d", signum);
+  if(got_exit_signal == 0) {
+    got_exit_signal = 1;
+    exit_signal = signum;
+  }
+  (void)signal(signum, exit_signal_handler);
+  errno = old_errno;
+}
+
+#ifdef WIN32
+/* CTRL event handler for Windows Console applications to simulate
+ * SIGINT, SIGTERM and SIGBREAK on CTRL events and trigger signal handler.
+ *
+ * Background information from MSDN:
+ * SIGINT is not supported for any Win32 application. When a CTRL+C
+ * interrupt occurs, Win32 operating systems generate a new thread
+ * to specifically handle that interrupt. This can cause a single-thread
+ * application, such as one in UNIX, to become multithreaded and cause
+ * unexpected behavior.
+ * [...]
+ * The SIGILL and SIGTERM signals are not generated under Windows.
+ * They are included for ANSI compatibility. Therefore, you can set
+ * signal handlers for these signals by using signal, and you can also
+ * explicitly generate these signals by calling raise. Source:
+ * https://docs.microsoft.com/de-de/cpp/c-runtime-library/reference/signal
+ */
+static BOOL WINAPI ctrl_event_handler(DWORD dwCtrlType)
+{
+  int signum = 0;
+  logmsg("ctrl_event_handler: %d", dwCtrlType);
+  switch(dwCtrlType) {
+#ifdef SIGINT
+    case CTRL_C_EVENT: signum = SIGINT; break;
+#endif
+#ifdef SIGTERM
+    case CTRL_CLOSE_EVENT: signum = SIGTERM; break;
+#endif
+#ifdef SIGBREAK
+    case CTRL_BREAK_EVENT: signum = SIGBREAK; break;
+#endif
+    default: return FALSE;
+  }
+  if(signum) {
+    logmsg("ctrl_event_handler: %d -> %d", dwCtrlType, signum);
+    exit_signal_handler(signum);
+  }
+  return TRUE;
+}
+/* Window message handler for Windows applications to add support
+ * for graceful process termination via taskkill (without /f) which
+ * sends WM_CLOSE to all Windows of a process (even hidden ones).
+ *
+ * Therefore we create and run a hidden Window in a separate thread
+ * to receive and handle the WM_CLOSE message as SIGTERM signal.
+ */
+static LRESULT CALLBACK main_window_proc(HWND hwnd, UINT uMsg,
+                                         WPARAM wParam, LPARAM lParam)
+{
+  int signum = 0;
+  if(hwnd == hidden_main_window) {
+    switch(uMsg) {
+#ifdef SIGTERM
+      case WM_CLOSE: signum = SIGTERM; break;
+#endif
+      case WM_DESTROY: PostQuitMessage(0); break;
+    }
+    if(signum) {
+      logmsg("main_window_proc: %d -> %d", uMsg, signum);
+      exit_signal_handler(signum);
+    }
+  }
+  return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+/* Window message queue loop for hidden main window, details see above.
+ */
+static DWORD WINAPI main_window_loop(LPVOID lpParameter)
+{
+  WNDCLASS wc;
+  BOOL ret;
+  MSG msg;
+
+  ZeroMemory(&wc, sizeof(wc));
+  wc.lpfnWndProc = (WNDPROC)main_window_proc;
+  wc.hInstance = (HINSTANCE)lpParameter;
+  wc.lpszClassName = "MainWClass";
+  if(!RegisterClass(&wc)) {
+    perror("RegisterClass failed");
+    return (DWORD)-1;
+  }
+
+  hidden_main_window = CreateWindowEx(0, "MainWClass", "Recv WM_CLOSE msg",
+                                      WS_OVERLAPPEDWINDOW,
+                                      CW_USEDEFAULT, CW_USEDEFAULT,
+                                      CW_USEDEFAULT, CW_USEDEFAULT,
+                                      (HWND)NULL, (HMENU)NULL,
+                                      wc.hInstance, (LPVOID)NULL);
+  if(!hidden_main_window) {
+    perror("CreateWindowEx failed");
+    return (DWORD)-1;
+  }
+
+  do {
+    ret = GetMessage(&msg, NULL, 0, 0);
+    if(ret == -1) {
+      perror("GetMessage failed");
+      return (DWORD)-1;
+    }
+    else if(ret) {
+      if(msg.message == WM_APP) {
+        DestroyWindow(hidden_main_window);
+      }
+      else if(msg.hwnd && !TranslateMessage(&msg)) {
+        DispatchMessage(&msg);
+      }
+    }
+  } while(ret);
+
+  hidden_main_window = NULL;
+  return (DWORD)msg.wParam;
+}
+#endif
+
+void install_signal_handlers(bool keep_sigalrm)
+{
+#ifdef SIGHUP
+  /* ignore SIGHUP signal */
+  old_sighup_handler = signal(SIGHUP, SIG_IGN);
+  if(old_sighup_handler == SIG_ERR)
+    logmsg("cannot install SIGHUP handler: %s", strerror(errno));
+#endif
+#ifdef SIGPIPE
+  /* ignore SIGPIPE signal */
+  old_sigpipe_handler = signal(SIGPIPE, SIG_IGN);
+  if(old_sigpipe_handler == SIG_ERR)
+    logmsg("cannot install SIGPIPE handler: %s", strerror(errno));
+#endif
+#ifdef SIGALRM
+  if(!keep_sigalrm) {
+    /* ignore SIGALRM signal */
+    old_sigalrm_handler = signal(SIGALRM, SIG_IGN);
+    if(old_sigalrm_handler == SIG_ERR)
+      logmsg("cannot install SIGALRM handler: %s", strerror(errno));
+  }
+#else
+  (void)keep_sigalrm;
+#endif
+#ifdef SIGINT
+  /* handle SIGINT signal with our exit_signal_handler */
+  old_sigint_handler = signal(SIGINT, exit_signal_handler);
+  if(old_sigint_handler == SIG_ERR)
+    logmsg("cannot install SIGINT handler: %s", strerror(errno));
+  else
+    siginterrupt(SIGINT, 1);
+#endif
+#ifdef SIGTERM
+  /* handle SIGTERM signal with our exit_signal_handler */
+  old_sigterm_handler = signal(SIGTERM, exit_signal_handler);
+  if(old_sigterm_handler == SIG_ERR)
+    logmsg("cannot install SIGTERM handler: %s", strerror(errno));
+  else
+    siginterrupt(SIGTERM, 1);
+#endif
+#if defined(SIGBREAK) && defined(WIN32)
+  /* handle SIGBREAK signal with our exit_signal_handler */
+  old_sigbreak_handler = signal(SIGBREAK, exit_signal_handler);
+  if(old_sigbreak_handler == SIG_ERR)
+    logmsg("cannot install SIGBREAK handler: %s", strerror(errno));
+  else
+    siginterrupt(SIGBREAK, 1);
+#endif
+#ifdef WIN32
+  if(!SetConsoleCtrlHandler(ctrl_event_handler, TRUE))
+    logmsg("cannot install CTRL event handler");
+  thread_main_window = CreateThread(NULL, 0,
+                                    &main_window_loop,
+                                    (LPVOID)GetModuleHandle(NULL),
+                                    0, &thread_main_id);
+  if(!thread_main_window || !thread_main_id)
+    logmsg("cannot start main window loop");
+#endif
+}
+
+void restore_signal_handlers(bool keep_sigalrm)
+{
+#ifdef SIGHUP
+  if(SIG_ERR != old_sighup_handler)
+    (void)signal(SIGHUP, old_sighup_handler);
+#endif
+#ifdef SIGPIPE
+  if(SIG_ERR != old_sigpipe_handler)
+    (void)signal(SIGPIPE, old_sigpipe_handler);
+#endif
+#ifdef SIGALRM
+  if(!keep_sigalrm) {
+    if(SIG_ERR != old_sigalrm_handler)
+      (void)signal(SIGALRM, old_sigalrm_handler);
+  }
+#else
+  (void)keep_sigalrm;
+#endif
+#ifdef SIGINT
+  if(SIG_ERR != old_sigint_handler)
+    (void)signal(SIGINT, old_sigint_handler);
+#endif
+#ifdef SIGTERM
+  if(SIG_ERR != old_sigterm_handler)
+    (void)signal(SIGTERM, old_sigterm_handler);
+#endif
+#if defined(SIGBREAK) && defined(WIN32)
+  if(SIG_ERR != old_sigbreak_handler)
+    (void)signal(SIGBREAK, old_sigbreak_handler);
+#endif
+#ifdef WIN32
+  (void)SetConsoleCtrlHandler(ctrl_event_handler, FALSE);
+  if(thread_main_window && thread_main_id) {
+    if(PostThreadMessage(thread_main_id, WM_APP, 0, 0))
+      (void)WaitForSingleObjectEx(thread_main_window, INFINITE, TRUE);
+  }
+#endif
+}
