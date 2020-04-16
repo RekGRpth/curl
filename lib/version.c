@@ -87,12 +87,12 @@ static size_t brotli_version(char *buf, size_t bufsz)
  */
 char *curl_version(void)
 {
-  static char out[250];
+  static char out[300];
   char *outp;
   size_t outlen;
   const char *src[14];
 #ifdef USE_SSL
-  char ssl_version[40];
+  char ssl_version[200];
 #endif
 #ifdef HAVE_LIBZ
   char z_version[40];
@@ -270,6 +270,9 @@ static const char * const protocols[] = {
      (!defined(USE_OPENLDAP) && defined(HAVE_LDAP_SSL)))
   "ldaps",
 #endif
+#endif
+#ifdef CURL_ENABLE_MQTT
+  "mqtt",
 #endif
 #ifndef CURL_DISABLE_POP3
   "pop3",

@@ -107,10 +107,10 @@ for my $l (@gitlog) {
         # not the first
         my $line = $1;
 
-        if($line =~ /^Fixes .*[^0-9](\d+)/i) {
+        if($line =~ /^Fixes(:|) .*[^0-9](\d+)/i) {
             push @fixes, $1;
         }
-        elsif($line =~ /^Closes .*[^0-9](\d+)/i) {
+        elsif($line =~ /^Closes(:|) .*[^0-9](\d+)/i) {
             push @closes, $1;
         }
         elsif($line =~ /^Bug: (.*)/i) {
@@ -160,6 +160,7 @@ for my $l (@releasenotes) {
             $refused[$moreinfo{$f}]=3;
         }
         push @o, " --- new entries are listed above this ---";
+        next;
     }
     elsif($cleanup) {
         if($l =~ /^ --- new entries are listed/) {
