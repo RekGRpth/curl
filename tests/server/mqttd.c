@@ -446,7 +446,6 @@ static curl_socket_t mqttit(curl_socket_t fd)
   size_t remaining_length = 0;
   size_t bytes = 0; /* remaining length field size in bytes */
   char client_id[MAX_CLIENT_ID_LENGTH];
-  char *filename;
   long testno;
 
   static const char protocol[7] = {
@@ -550,8 +549,7 @@ static curl_socket_t mqttit(curl_socket_t fd)
         char *data;
         size_t datalen;
         logmsg("Found test number %ld", testno);
-        filename = test2file(testno);
-        stream = fopen(filename, "rb");
+        stream = test2fopen(testno);
         error = getpart(&data, &datalen, "reply", "data", stream);
         if(!error)
           publish(dump, fd, packet_id, topic, data, datalen);
@@ -643,7 +641,7 @@ static bool incoming(curl_socket_t listenfd)
         logmsg("signalled to die, exiting...");
         return FALSE;
       }
-    } while((rc == -1) && ((error = errno) == EINTR));
+    } while((rc == -1) && ((error = SOCKERRNO) == EINTR));
 
     if(rc < 0) {
       logmsg("select() failed with error: (%d) %s",
@@ -700,9 +698,7 @@ static curl_socket_t sockdaemon(curl_socket_t sock,
         rc = wait_ms(delay);
         if(rc) {
           /* should not happen */
-          error = errno;
-          logmsg("wait_ms() failed with error: (%d) %s",
-                 error, strerror(error));
+          logmsg("wait_ms() failed with error: %d", rc);
           sclose(sock);
           return CURL_SOCKET_BAD;
         }
