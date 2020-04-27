@@ -679,7 +679,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
             CERT_FIND_ANY, NULL, NULL);
 
         if(client_certs[0] == NULL) {
-          failf(data, "schannel: Failed to get certificat from file %s"
+          failf(data, "schannel: Failed to get certificate from file %s"
                 ", last error is 0x%x",
                 data->set.ssl.cert, GetLastError());
           CertCloseStore(cert_store, 0);
@@ -1645,9 +1645,9 @@ schannel_send(struct connectdata *conn, int sockindex,
         written = -1;
         break;
       }
-      if(!timeout_ms || timeout_ms > TIME_T_MAX)
-        timeout_ms = TIME_T_MAX;
-      what = SOCKET_WRITABLE(conn->sock[sockindex], (time_t)timeout_ms);
+      if(!timeout_ms)
+        timeout_ms = TIMEDIFF_T_MAX;
+      what = SOCKET_WRITABLE(conn->sock[sockindex], timeout_ms);
       if(what < 0) {
         /* fatal error */
         failf(conn->data, "select/poll on SSL socket, errno: %d", SOCKERRNO);
