@@ -199,7 +199,7 @@ FILE *test2fopen(long testno)
   FILE *stream;
   char filename[256];
   /* first try the alternative, preprocessed, file */
-  msnprintf(filename, sizeof(filename), ALTTEST_DATA_PATH, path, testno);
+  msnprintf(filename, sizeof(filename), ALTTEST_DATA_PATH, ".", testno);
   stream = fopen(filename, "rb");
   if(stream)
     return stream;
@@ -632,7 +632,7 @@ static BOOL WINAPI ctrl_event_handler(DWORD dwCtrlType)
   }
   if(signum) {
     logmsg("ctrl_event_handler: %d -> %d", dwCtrlType, signum);
-    exit_signal_handler(signum);
+    raise(signum);
   }
   return TRUE;
 }
@@ -656,7 +656,7 @@ static LRESULT CALLBACK main_window_proc(HWND hwnd, UINT uMsg,
     }
     if(signum) {
       logmsg("main_window_proc: %d -> %d", uMsg, signum);
-      exit_signal_handler(signum);
+      raise(signum);
     }
   }
   return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -803,8 +803,15 @@ void restore_signal_handlers(bool keep_sigalrm)
 #ifdef WIN32
   (void)SetConsoleCtrlHandler(ctrl_event_handler, FALSE);
   if(thread_main_window && thread_main_id) {
-    if(PostThreadMessage(thread_main_id, WM_APP, 0, 0))
-      (void)WaitForSingleObjectEx(thread_main_window, INFINITE, TRUE);
+    if(PostThreadMessage(thread_main_id, WM_APP, 0, 0)) {
+      if(WaitForSingleObjectEx(thread_main_window, INFINITE, TRUE)) {
+        if(CloseHandle(thread_main_window)) {
+          thread_main_window = NULL;
+          thread_main_id = 0;
+        }
+      }
+    }
+  }
   }
 #endif
 }
