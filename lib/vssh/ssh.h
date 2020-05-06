@@ -144,9 +144,7 @@ struct ssh_conn {
                                  quote command fails) */
   char *homedir;              /* when doing SFTP we figure out home dir in the
                                  connect phase */
-  size_t readdir_len, readdir_totalLen, readdir_currLen;
   char *readdir_line;
-  char *readdir_linkPath;
   /* end of READDIR stuff */
 
   int secondCreateDirs;         /* counter use by the code to see if the
@@ -157,6 +155,8 @@ struct ssh_conn {
   int orig_waitfor;             /* default READ/WRITE bits wait for */
 
 #if defined(USE_LIBSSH)
+  char *readdir_linkPath;
+  size_t readdir_len, readdir_totalLen, readdir_currLen;
 /* our variables */
   unsigned kbd_state; /* 0 or 1 */
   ssh_key privkey;
@@ -179,6 +179,8 @@ struct ssh_conn {
   const char *readdir_longentry;
   char *readdir_tmp;
 #elif defined(USE_LIBSSH2)
+  struct dynbuf readdir_link;
+  struct dynbuf readdir;
   char *readdir_filename;
   char *readdir_longentry;
 

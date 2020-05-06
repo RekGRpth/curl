@@ -104,6 +104,7 @@
 #include "hostip.h"
 #include "hash.h"
 #include "splay.h"
+#include "dynbuf.h"
 
 /* return the count of bytes sent, or -1 on error */
 typedef ssize_t (Curl_send)(struct connectdata *conn, /* connection data */
@@ -151,10 +152,6 @@ typedef ssize_t (Curl_recv)(struct connectdata *conn, /* connection data */
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 #endif /* HAVE_LIBSSH2_H */
-
-/* Initial size of the buffer to store headers in, it'll be enlarged in case
-   of need. */
-#define HEADERSIZE 256
 
 #define CURLEASY_MAGIC_NUMBER 0xc0dedbadU
 #define GOOD_EASY_HANDLE(x) \
@@ -556,18 +553,13 @@ enum doh_slots {
   DOH_PROBE_SLOTS
 };
 
-struct dohresponse {
-  unsigned char *memory;
-  size_t size;
-};
-
 /* one of these for each DoH request */
 struct dnsprobe {
   CURL *easy;
   int dnstype;
   unsigned char dohbuffer[512];
   size_t dohlen;
-  struct dohresponse serverdoh;
+  struct dynbuf serverdoh;
 };
 
 struct dohdata {
@@ -611,12 +603,7 @@ struct SingleRequest {
                                    written as body */
   int headerline;               /* counts header lines to better track the
                                    first one */
-  char *hbufp;                  /* points at *end* of header line */
-  size_t hbuflen;
   char *str;                    /* within buf */
-  char *str_start;              /* within buf */
-  char *end_ptr;                /* within buf */
-  char *p;                      /* within headerbuff */
   curl_off_t offset;            /* possible resume offset read from the
                                    Content-Range: header */
   int httpcode;                 /* error code from the 'HTTP/1.? XXX' or
@@ -797,15 +784,10 @@ struct proxy_info {
   char *passwd;  /* proxy password string, allocated */
 };
 
-#define CONNECT_BUFFER_SIZE 16384
-
 /* struct for HTTP CONNECT state data */
 struct http_connect_state {
-  char connect_buffer[CONNECT_BUFFER_SIZE];
-  int perline; /* count bytes per line */
+  struct dynbuf rcvbuf;
   int keepon;
-  char *line_start;
-  char *ptr; /* where to store more data */
   curl_off_t cl; /* size of content to read and ignore */
   enum {
     TUNNEL_INIT,    /* init/default/no tunnel state */
@@ -1278,9 +1260,7 @@ struct Curl_http2_dep {
  * BODY).
  */
 struct tempbuf {
-  char *buf;  /* allocated buffer to keep data in when a write callback
-                 returns to make the connection paused */
-  size_t len; /* size of the 'tempwrite' allocated buffer */
+  struct dynbuf b;
   int type;   /* type of the 'tempwrite' buffer as a bitmask that is used with
                  Curl_client_write() */
 };
@@ -1340,9 +1320,7 @@ struct UrlState {
   struct curltime keeps_speed; /* for the progress meter really */
 
   struct connectdata *lastconnect; /* The last connection, NULL if undefined */
-
-  char *headerbuff; /* allocated buffer to store headers in */
-  size_t headersize;   /* size of the allocation */
+  struct dynbuf headerb; /* buffer to store headers in */
 
   char *buffer; /* download buffer */
   char *ulbuf; /* allocated upload buffer or NULL */
@@ -1422,8 +1400,8 @@ struct UrlState {
   struct urlpieces up;
 #ifndef CURL_DISABLE_HTTP
   size_t trailers_bytes_sent;
-  Curl_send_buffer *trailers_buf; /* a buffer containing the compiled trailing
-                                  headers */
+  struct dynbuf trailers_buf; /* a buffer containing the compiled trailing
+                                 headers */
 #endif
   trailers_state trailers_state; /* whether we are sending trailers
                                        and what stage are we at */
