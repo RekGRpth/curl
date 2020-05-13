@@ -26,7 +26,6 @@
 # The output .so file lacks the soname number which we currently have within the lib/Makefile.am file
 # Add full (4 or 5 libs) SSL support
 # Add INSTALL target (EXTRA_DIST variables in Makefile.am may be moved to Makefile.inc so that CMake/CPack is aware of what's to include).
-# Add CTests(?)
 # Check on all possible platforms
 # Test with as many configurations possible (With or without any option)
 # Create scripts that help keeping the CMake build system up to date (to reduce maintenance). According to Tetetest:
@@ -38,7 +37,7 @@
 # To check:
 # (From Daniel Stenberg) The cmake build selected to run gcc with -fPIC on my box while the plain configure script did not.
 # (From Daniel Stenberg) The gcc command line use neither -g nor any -O options. As a developer, I also treasure our configure scripts's --enable-debug option that sets a long range of "picky" compiler options.
-cmake_minimum_required(VERSION 3.0...3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.2...3.16 FATAL_ERROR)
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake;${CMAKE_MODULE_PATH}")
 include(Utilities)
@@ -221,10 +220,6 @@ cmake_dependent_option(ENABLE_MANUAL "to provide the built-in manual"
     ON "NROFF_USEFUL;PERL_FOUND"
     OFF)
 
-if(NOT PERL_FOUND)
-  message(STATUS "Perl not found, testing disabled.")
-  set(BUILD_TESTING OFF)
-endif()
 if(ENABLE_MANUAL)
   set(USE_MANUAL ON)
 endif()
@@ -1280,8 +1275,10 @@ if(BUILD_CURL_EXE)
   add_subdirectory(src)
 endif()
 
-include(CTest)
-if(BUILD_TESTING)
+option(BUILD_TESTING "Build tests" "${PERL_FOUND}")
+if(NOT PERL_FOUND)
+  message(STATUS "Perl not found, testing disabled.")
+elseif(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
@@ -1394,13 +1391,6 @@ set(CONFIGURE_OPTIONS       "")
 # TODO when to set "-DCURL_STATICLIB" for CPPFLAG_CURL_STATICLIB?
 set(CPPFLAG_CURL_STATICLIB  "")
 set(CURLVERSION             "${CURL_VERSION}")
-if(BUILD_SHARED_LIBS)
-  set(ENABLE_SHARED         "yes")
-  set(ENABLE_STATIC         "no")
-else()
-  set(ENABLE_SHARED         "no")
-  set(ENABLE_STATIC         "yes")
-endif()
 set(exec_prefix             "\${prefix}")
 set(includedir              "\${prefix}/include")
 set(LDFLAGS                 "${CMAKE_SHARED_LINKER_FLAGS}")
@@ -1413,6 +1403,15 @@ foreach(_lib ${CMAKE_C_IMPLICIT_LINK_LIBRARIES} ${CURL_LIBS})
     set(LIBCURL_LIBS          "${LIBCURL_LIBS} -l${_lib}")
   endif()
 endforeach()
+if(BUILD_SHARED_LIBS)
+  set(ENABLE_SHARED         "yes")
+  set(ENABLE_STATIC         "no")
+  set(LIBCURL_NO_SHARED     "")
+else()
+  set(ENABLE_SHARED         "no")
+  set(ENABLE_STATIC         "yes")
+  set(LIBCURL_NO_SHARED     "${LIBCURL_LIBS}")
+endif()
 # "a" (Linux) or "lib" (Windows)
 string(REPLACE "." "" libext "${CMAKE_STATIC_LIBRARY_SUFFIX}")
 set(prefix                  "${CMAKE_INSTALL_PREFIX}")

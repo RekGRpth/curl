@@ -399,6 +399,8 @@ static const struct helptxt helptext[] = {
    "Retry on connection refused (use with --retry)"},
   {"    --retry-delay <seconds>",
    "Wait time between retries"},
+  {"    --retry-all-errors",
+   "Retry all errors (use with --retry)"},
   {"    --retry-max-time <seconds>",
    "Retry only within this period"},
   {"    --sasl-authzid <identity> ",
