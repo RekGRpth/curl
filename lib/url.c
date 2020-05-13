@@ -177,6 +177,10 @@ static const struct Curl_handler * const protocols[] = {
   &Curl_handler_scp,
 #endif
 
+#if defined(USE_LIBSSH)
+  &Curl_handler_ssh,
+#endif
+
 #ifndef CURL_DISABLE_SMTP
   &Curl_handler_smtp,
 #ifdef USE_SSL
@@ -191,26 +195,6 @@ static const struct Curl_handler * const protocols[] = {
      (!defined(USE_OPENLDAP) && defined(HAVE_LDAP_SSL)))
   &Curl_handler_ldaps,
 #endif
-#endif
-
-#ifndef CURL_DISABLE_FILE
-  &Curl_handler_file,
-#endif
-
-#ifndef CURL_DISABLE_TFTP
-  &Curl_handler_tftp,
-#endif
-
-#if defined(USE_SSH) && !defined(USE_WOLFSSH)
-  &Curl_handler_scp,
-#endif
-
-#if defined(USE_LIBSSH)
-  &Curl_handler_ssh,
-#endif
-
-#if defined(USE_SSH)
-  &Curl_handler_sftp,
 #endif
 
 #ifndef CURL_DISABLE_IMAP
