@@ -699,7 +699,7 @@ static CURLcode single_transfer(struct GlobalConfig *global,
 {
   CURLcode result = CURLE_OK;
   struct getout *urlnode;
-  metalinkfile *mlfile_last = NULL;
+  struct metalinkfile *mlfile_last = NULL;
   bool orig_noprogress = global->noprogress;
   bool orig_isatty = global->isatty;
   struct State *state = &config->state;
@@ -740,10 +740,10 @@ static CURLcode single_transfer(struct GlobalConfig *global,
 
   while(config->state.urlnode) {
     char *infiles; /* might be a glob pattern */
-    URLGlob *inglob = state->inglob;
+    struct URLGlob *inglob = state->inglob;
     bool metalink = FALSE; /* metalink download? */
-    metalinkfile *mlfile;
-    metalink_resource *mlres;
+    struct metalinkfile *mlfile;
+    struct metalink_resource *mlres;
 
     urlnode = config->state.urlnode;
     if(urlnode->flags & GETOUT_METALINK) {
@@ -1556,11 +1556,90 @@ static CURLcode single_transfer(struct GlobalConfig *global,
             }
           }
 
+          /* In debug build of curl tool, using
+           *    --cert loadmem=<filename>:<password> --cert-type p12
+           *  must do the same thing than classic:
+           *    --cert <filename>:<password> --cert-type p12
+           *  but is designed to test blob */
+#if defined(CURLDEBUG) || defined(DEBUGBUILD)
+          if(config->cert && (strlen(config->cert) > 8) &&
+             (memcmp(config->cert, "loadmem=",8) == 0)) {
+            FILE *fInCert = fopen(config->cert + 8, "rb");
+            void *certdata = NULL;
+            long filesize = 0;
+            bool continue_reading = fInCert != NULL;
+            if(continue_reading)
+              continue_reading = fseek(fInCert, 0, SEEK_END) == 0;
+            if(continue_reading)
+              filesize = ftell(fInCert);
+            if(filesize < 0)
+              continue_reading = FALSE;
+            if(continue_reading)
+              continue_reading = fseek(fInCert, 0, SEEK_SET) == 0;
+            if(continue_reading)
+              certdata = malloc(((size_t)filesize) + 1);
+            if((!certdata) ||
+                ((int)fread(certdata, (size_t)filesize, 1, fInCert) != 1))
+              continue_reading = FALSE;
+            if(fInCert)
+              fclose(fInCert);
+            if((filesize > 0) && continue_reading) {
+              struct curl_blob structblob;
+              structblob.data = certdata;
+              structblob.len = (size_t)filesize;
+              structblob.flags = CURL_BLOB_COPY;
+              my_setopt_str(curl, CURLOPT_SSLCERT_BLOB, &structblob);
+              /* if test run well, we are sure we don't reuse
+               * original mem pointer */
+              memset(certdata, 0, (size_t)filesize);
+            }
+            free(certdata);
+          }
+          else
+#endif
           my_setopt_str(curl, CURLOPT_SSLCERT, config->cert);
           my_setopt_str(curl, CURLOPT_PROXY_SSLCERT, config->proxy_cert);
           my_setopt_str(curl, CURLOPT_SSLCERTTYPE, config->cert_type);
           my_setopt_str(curl, CURLOPT_PROXY_SSLCERTTYPE,
                         config->proxy_cert_type);
+
+
+#if defined(CURLDEBUG) || defined(DEBUGBUILD)
+          if(config->key && (strlen(config->key) > 8) &&
+             (memcmp(config->key, "loadmem=",8) == 0)) {
+            FILE *fInCert = fopen(config->key + 8, "rb");
+            void *certdata = NULL;
+            long filesize = 0;
+            bool continue_reading = fInCert != NULL;
+            if(continue_reading)
+              continue_reading = fseek(fInCert, 0, SEEK_END) == 0;
+            if(continue_reading)
+              filesize = ftell(fInCert);
+            if(filesize < 0)
+              continue_reading = FALSE;
+            if(continue_reading)
+              continue_reading = fseek(fInCert, 0, SEEK_SET) == 0;
+            if(continue_reading)
+              certdata = malloc(((size_t)filesize) + 1);
+            if((!certdata) ||
+                ((int)fread(certdata, (size_t)filesize, 1, fInCert) != 1))
+              continue_reading = FALSE;
+            if(fInCert)
+              fclose(fInCert);
+            if((filesize > 0) && continue_reading) {
+              struct curl_blob structblob;
+              structblob.data = certdata;
+              structblob.len = (size_t)filesize;
+              structblob.flags = CURL_BLOB_COPY;
+              my_setopt_str(curl, CURLOPT_SSLKEY_BLOB, &structblob);
+              /* if test run well, we are sure we don't reuse
+               * original mem pointer */
+              memset(certdata, 0, (size_t)filesize);
+            }
+            free(certdata);
+          }
+          else
+#endif
           my_setopt_str(curl, CURLOPT_SSLKEY, config->key);
           my_setopt_str(curl, CURLOPT_PROXY_SSLKEY, config->proxy_key);
           my_setopt_str(curl, CURLOPT_SSLKEYTYPE, config->key_type);
@@ -2427,6 +2506,7 @@ static CURLcode run_all_transfers(struct GlobalConfig *global,
 CURLcode operate(struct GlobalConfig *global, int argc, argv_item_t argv[])
 {
   CURLcode result = CURLE_OK;
+  char *first_arg = curlx_convert_tchar_to_UTF8(argv[1]);
 
   /* Setup proper locale from environment */
 #ifdef HAVE_SETLOCALE
@@ -2435,8 +2515,8 @@ CURLcode operate(struct GlobalConfig *global, int argc, argv_item_t argv[])
 
   /* Parse .curlrc if necessary */
   if((argc == 1) ||
-     (!curl_strequal(argv[1], "-q") &&
-      !curl_strequal(argv[1], "--disable"))) {
+     (!curl_strequal(first_arg, "-q") &&
+      !curl_strequal(first_arg, "--disable"))) {
     parseconfig(NULL, global); /* ignore possible failure */
 
     /* If we had no arguments then make sure a url was specified in .curlrc */
@@ -2445,6 +2525,8 @@ CURLcode operate(struct GlobalConfig *global, int argc, argv_item_t argv[])
       result = CURLE_FAILED_INIT;
     }
   }
+
+  curlx_unicodefree(first_arg);
 
   if(!result) {
     /* Parse the command line arguments */

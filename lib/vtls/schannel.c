@@ -39,6 +39,7 @@
 
 #include "schannel.h"
 #include "vtls.h"
+#include "strcase.h"
 #include "sendf.h"
 #include "connect.h" /* for the connect timeout */
 #include "strerror.h"
@@ -583,94 +584,122 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
 
 #ifdef HAS_CLIENT_CERT_PATH
     /* client certificate */
-    if(data->set.ssl.cert) {
-      DWORD cert_store_name;
+    if(data->set.ssl.cert || data->set.ssl.cert_blob) {
+      DWORD cert_store_name = 0;
       TCHAR *cert_store_path = NULL;
-      TCHAR *cert_thumbprint_str;
+      TCHAR *cert_thumbprint_str = NULL;
       CRYPT_HASH_BLOB cert_thumbprint;
       BYTE cert_thumbprint_data[CERT_THUMBPRINT_DATA_LEN];
-      HCERTSTORE cert_store;
+      HCERTSTORE cert_store = NULL;
       FILE *fInCert = NULL;
+      void *certdata = NULL;
+      size_t certsize = 0;
+      bool blob = data->set.ssl.cert_blob != NULL;
+      TCHAR *cert_path = NULL;
+      if(blob) {
+        certdata = data->set.ssl.cert_blob->data;
+        certsize = data->set.ssl.cert_blob->len;
+      }
+      else {
+        cert_path = curlx_convert_UTF8_to_tchar(data->set.ssl.cert);
+        if(!cert_path)
+          return CURLE_OUT_OF_MEMORY;
 
-      TCHAR *cert_path = Curl_convert_UTF8_to_tchar(data->set.ssl.cert);
-      if(!cert_path)
-        return CURLE_OUT_OF_MEMORY;
+        result = get_cert_location(cert_path, &cert_store_name,
+          &cert_store_path, &cert_thumbprint_str);
 
-      result = get_cert_location(cert_path, &cert_store_name,
-                                 &cert_store_path, &cert_thumbprint_str);
-      if((result != CURLE_OK) && (data->set.ssl.cert[0]!='\0'))
-        fInCert = fopen(data->set.ssl.cert, "rb");
+        if(result && (data->set.ssl.cert[0]!='\0'))
+          fInCert = fopen(data->set.ssl.cert, "rb");
 
-      if((result != CURLE_OK) && (fInCert == NULL)) {
-        failf(data, "schannel: Failed to get certificate location"
-              " or file for %s",
-              data->set.ssl.cert);
-        Curl_unicodefree(cert_path);
-        return result;
+        if(result && !fInCert) {
+          failf(data, "schannel: Failed to get certificate location"
+                " or file for %s",
+                data->set.ssl.cert);
+          curlx_unicodefree(cert_path);
+          return result;
+        }
       }
 
-      if(fInCert) {
+      if((fInCert || blob) && (data->set.ssl.cert_type) &&
+          (!strcasecompare(data->set.ssl.cert_type, "P12"))) {
+        failf(data, "schannel: certificate format compatibility error "
+                " for %s",
+                blob ? "(memory blob)" : data->set.ssl.cert);
+        curlx_unicodefree(cert_path);
+        return CURLE_SSL_CERTPROBLEM;
+      }
+
+      if(fInCert || blob) {
         /* Reading a .P12 or .pfx file, like the example at bottom of
-           https://social.msdn.microsoft.com/Forums/windowsdesktop/
-           en-US/3e7bc95f-b21a-4bcd-bd2c-7f996718cae5
+             https://social.msdn.microsoft.com/Forums/windowsdesktop/
+                            en-US/3e7bc95f-b21a-4bcd-bd2c-7f996718cae5
         */
-        void *certdata = NULL;
-        long filesize = 0;
         CRYPT_DATA_BLOB datablob;
         WCHAR* pszPassword;
         size_t pwd_len = 0;
         int str_w_len = 0;
-        int continue_reading = fseek(fInCert, 0, SEEK_END) == 0;
-        if(continue_reading)
-          filesize = ftell(fInCert);
-        if(filesize < 0)
-          continue_reading = 0;
-        if(continue_reading)
-          continue_reading = fseek(fInCert, 0, SEEK_SET) == 0;
-        if(continue_reading)
-          certdata = malloc(((size_t)filesize) + 1);
-        if((certdata == NULL) ||
-           ((int) fread(certdata, (size_t)filesize, 1, fInCert) != 1))
-          continue_reading = 0;
-        fclose(fInCert);
-        Curl_unicodefree(cert_path);
-
-        if(!continue_reading) {
-          failf(data, "schannel: Failed to read cert file %s",
+        const char *cert_showfilename_error = blob ?
+          "(memory blob)" : data->set.ssl.cert;
+        curlx_unicodefree(cert_path);
+        if(fInCert) {
+          long cert_tell = 0;
+          bool continue_reading = fseek(fInCert, 0, SEEK_END) == 0;
+          if(continue_reading)
+            cert_tell = ftell(fInCert);
+          if(cert_tell < 0)
+            continue_reading = FALSE;
+          else
+            certsize = (size_t)cert_tell;
+          if(continue_reading)
+            continue_reading = fseek(fInCert, 0, SEEK_SET) == 0;
+          if(continue_reading)
+            certdata = malloc(certsize + 1);
+          if((!certdata) ||
+             ((int) fread(certdata, certsize, 1, fInCert) != 1))
+            continue_reading = FALSE;
+          fclose(fInCert);
+          if(!continue_reading) {
+            failf(data, "schannel: Failed to read cert file %s",
                 data->set.ssl.cert);
-          free(certdata);
-          return CURLE_SSL_CERTPROBLEM;
+            free(certdata);
+            return CURLE_SSL_CERTPROBLEM;
+          }
         }
 
         /* Convert key-pair data to the in-memory certificate store */
         datablob.pbData = (BYTE*)certdata;
-        datablob.cbData = (DWORD)filesize;
+        datablob.cbData = (DWORD)certsize;
 
         if(data->set.ssl.key_passwd != NULL)
           pwd_len = strlen(data->set.ssl.key_passwd);
         pszPassword = (WCHAR*)malloc(sizeof(WCHAR)*(pwd_len + 1));
-        if(pwd_len > 0)
-          str_w_len =
-            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-                                data->set.ssl.key_passwd, (int)pwd_len,
-                                pszPassword, (int)(pwd_len + 1));
+        if(pszPassword) {
+          if(pwd_len > 0)
+            str_w_len = MultiByteToWideChar(CP_UTF8,
+               MB_ERR_INVALID_CHARS,
+               data->set.ssl.key_passwd, (int)pwd_len,
+               pszPassword, (int)(pwd_len + 1));
 
-        if((str_w_len >= 0) && (str_w_len <= (int)pwd_len))
-          pszPassword[str_w_len] = 0;
-        else
-          pszPassword[0] = 0;
+          if((str_w_len >= 0) && (str_w_len <= (int)pwd_len))
+            pszPassword[str_w_len] = 0;
+          else
+            pszPassword[0] = 0;
 
-        cert_store = PFXImportCertStore(&datablob, pszPassword, 0);
-        free(pszPassword);
-        free(certdata);
+          cert_store = PFXImportCertStore(&datablob, pszPassword, 0);
+          free(pszPassword);
+        }
+        if(!blob)
+          free(certdata);
         if(cert_store == NULL) {
           DWORD errorcode = GetLastError();
           if(errorcode == ERROR_INVALID_PASSWORD)
             failf(data, "schannel: Failed to import cert file %s, "
-                  "password is bad", data->set.ssl.cert);
+                  "password is bad",
+                  cert_showfilename_error);
           else
             failf(data, "schannel: Failed to import cert file %s, "
-                  "last error is 0x%x", data->set.ssl.cert, errorcode);
+                  "last error is 0x%x",
+                  cert_showfilename_error, errorcode);
           return CURLE_SSL_CERTPROBLEM;
         }
 
@@ -681,7 +710,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
         if(client_certs[0] == NULL) {
           failf(data, "schannel: Failed to get certificate from file %s"
                 ", last error is 0x%x",
-                data->set.ssl.cert, GetLastError());
+                cert_showfilename_error, GetLastError());
           CertCloseStore(cert_store, 0);
           return CURLE_SSL_CERTPROBLEM;
         }
@@ -700,7 +729,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
                 "last error is 0x%x",
                 cert_store_name, cert_store_path, GetLastError());
           free(cert_store_path);
-          Curl_unicodefree(cert_path);
+          curlx_unicodefree(cert_path);
           return CURLE_SSL_CERTPROBLEM;
         }
         free(cert_store_path);
@@ -714,7 +743,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
                                 cert_thumbprint_data,
                                 &cert_thumbprint.cbData,
                                 NULL, NULL)) {
-          Curl_unicodefree(cert_path);
+          curlx_unicodefree(cert_path);
           CertCloseStore(cert_store, 0);
           return CURLE_SSL_CERTPROBLEM;
         }
@@ -723,7 +752,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
           cert_store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0,
           CERT_FIND_HASH, &cert_thumbprint, NULL);
 
-        Curl_unicodefree(cert_path);
+        curlx_unicodefree(cert_path);
 
         if(client_certs[0]) {
           schannel_cred.cCreds = 1;
@@ -867,7 +896,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
     return CURLE_OUT_OF_MEMORY;
   }
 
-  host_name = Curl_convert_UTF8_to_tchar(hostname);
+  host_name = curlx_convert_UTF8_to_tchar(hostname);
   if(!host_name)
     return CURLE_OUT_OF_MEMORY;
 
@@ -884,7 +913,7 @@ schannel_connect_step1(struct connectdata *conn, int sockindex)
     0, &BACKEND->ctxt->ctxt_handle,
     &outbuf_desc, &BACKEND->ret_flags, &BACKEND->ctxt->time_stamp);
 
-  Curl_unicodefree(host_name);
+  curlx_unicodefree(host_name);
 
   if(sspi_status != SEC_I_CONTINUE_NEEDED) {
     char buffer[STRERROR_LEN];
@@ -1067,7 +1096,7 @@ schannel_connect_step2(struct connectdata *conn, int sockindex)
     memcpy(inbuf[0].pvBuffer, BACKEND->encdata_buffer,
            BACKEND->encdata_offset);
 
-    host_name = Curl_convert_UTF8_to_tchar(hostname);
+    host_name = curlx_convert_UTF8_to_tchar(hostname);
     if(!host_name)
       return CURLE_OUT_OF_MEMORY;
 
@@ -1078,7 +1107,7 @@ schannel_connect_step2(struct connectdata *conn, int sockindex)
       host_name, BACKEND->req_flags, 0, 0, &inbuf_desc, 0, NULL,
       &outbuf_desc, &BACKEND->ret_flags, &BACKEND->ctxt->time_stamp);
 
-    Curl_unicodefree(host_name);
+    curlx_unicodefree(host_name);
 
     /* free buffer for received handshake data */
     Curl_safefree(inbuf[0].pvBuffer);
@@ -2112,7 +2141,7 @@ static int Curl_schannel_shutdown(struct connectdata *conn, int sockindex)
             Curl_sspi_strerror(sspi_status, buffer, sizeof(buffer)));
     }
 
-    host_name = Curl_convert_UTF8_to_tchar(hostname);
+    host_name = curlx_convert_UTF8_to_tchar(hostname);
     if(!host_name)
       return CURLE_OUT_OF_MEMORY;
 
@@ -2134,7 +2163,7 @@ static int Curl_schannel_shutdown(struct connectdata *conn, int sockindex)
       &BACKEND->ret_flags,
       &BACKEND->ctxt->time_stamp);
 
-    Curl_unicodefree(host_name);
+    curlx_unicodefree(host_name);
 
     if((sspi_status == SEC_E_OK) || (sspi_status == SEC_I_CONTEXT_EXPIRED)) {
       /* send close message which is in output buffer */
@@ -2243,8 +2272,8 @@ static CURLcode pkp_pin_peer_pubkey(struct connectdata *conn, int sockindex,
     SECURITY_STATUS sspi_status;
     const char *x509_der;
     DWORD x509_der_len;
-    curl_X509certificate x509_parsed;
-    curl_asn1Element *pubkey;
+    struct Curl_X509certificate x509_parsed;
+    struct Curl_asn1Element *pubkey;
 
     sspi_status =
       s_pSecFn->QueryContextAttributes(&BACKEND->ctxt->ctxt_handle,

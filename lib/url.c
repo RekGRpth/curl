@@ -285,8 +285,14 @@ void Curl_freeset(struct Curl_easy *data)
 {
   /* Free all dynamic strings stored in the data->set substructure. */
   enum dupstring i;
+  enum dupblob j;
+
   for(i = (enum dupstring)0; i < STRING_LAST; i++) {
     Curl_safefree(data->set.str[i]);
+  }
+
+  for(j = (enum dupblob)0; j < BLOB_LAST; j++) {
+    Curl_safefree(data->set.blobs[j]);
   }
 
   if(data->change.referer_alloc) {
@@ -2792,12 +2798,14 @@ static CURLcode override_login(struct Curl_easy *data,
 
   /* for updated strings, we update them in the URL */
   if(user_changed) {
-    uc = curl_url_set(data->state.uh, CURLUPART_USER, *userp, 0);
+    uc = curl_url_set(data->state.uh, CURLUPART_USER, *userp,
+                      CURLU_URLENCODE);
     if(uc)
       return Curl_uc_to_curlcode(uc);
   }
   if(passwd_changed) {
-    uc = curl_url_set(data->state.uh, CURLUPART_PASSWORD, *passwdp, 0);
+    uc = curl_url_set(data->state.uh, CURLUPART_PASSWORD, *passwdp,
+                      CURLU_URLENCODE);
     if(uc)
       return Curl_uc_to_curlcode(uc);
   }
@@ -3618,6 +3626,12 @@ static CURLcode create_conn(struct Curl_easy *data,
   data->set.ssl.password = data->set.str[STRING_TLSAUTH_PASSWORD_ORIG];
   data->set.proxy_ssl.password = data->set.str[STRING_TLSAUTH_PASSWORD_PROXY];
 #endif
+
+  data->set.ssl.cert_blob = data->set.blobs[BLOB_CERT_ORIG];
+  data->set.proxy_ssl.cert_blob = data->set.blobs[BLOB_CERT_PROXY];
+  data->set.ssl.key_blob = data->set.blobs[BLOB_KEY_ORIG];
+  data->set.proxy_ssl.key_blob = data->set.blobs[BLOB_KEY_PROXY];
+  data->set.ssl.issuercert_blob = data->set.blobs[BLOB_SSL_ISSUERCERT_ORIG];
 
   if(!Curl_clone_primary_ssl_config(&data->set.ssl.primary,
      &conn->ssl_config)) {

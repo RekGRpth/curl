@@ -951,6 +951,7 @@ typedef enum {
 #define CURLOPTTYPE_OBJECTPOINT   10000
 #define CURLOPTTYPE_FUNCTIONPOINT 20000
 #define CURLOPTTYPE_OFF_T         30000
+#define CURLOPTTYPE_BLOB          40000
 
 /* *STRINGPOINT is an alias for OBJECTPOINT to allow tools to extract the
    string options from the header file */
@@ -1960,6 +1961,13 @@ typedef enum {
   /* allow RCPT TO command to fail for some recipients */
   CURLOPT(CURLOPT_MAIL_RCPT_ALLLOWFAILS, CURLOPTTYPE_LONG, 290),
 
+  /* the private SSL-certificate as a "blob" */
+  CURLOPT(CURLOPT_SSLCERT_BLOB, CURLOPTTYPE_BLOB, 291),
+  CURLOPT(CURLOPT_SSLKEY_BLOB, CURLOPTTYPE_BLOB, 292),
+  CURLOPT(CURLOPT_PROXY_SSLCERT_BLOB, CURLOPTTYPE_BLOB, 293),
+  CURLOPT(CURLOPT_PROXY_SSLKEY_BLOB, CURLOPTTYPE_BLOB, 294),
+  CURLOPT(CURLOPT_ISSUERCERT_BLOB, CURLOPTTYPE_BLOB, 295),
+
   CURLOPT_LASTENTRY /* the last unused */
 } CURLoption;
 
@@ -2116,8 +2124,8 @@ CURL_EXTERN int curl_strequal(const char *s1, const char *s2);
 CURL_EXTERN int curl_strnequal(const char *s1, const char *s2, size_t n);
 
 /* Mime/form handling support. */
-typedef struct curl_mime_s      curl_mime;      /* Mime context. */
-typedef struct curl_mimepart_s  curl_mimepart;  /* Mime part context. */
+typedef struct curl_mime      curl_mime;      /* Mime context. */
+typedef struct curl_mimepart  curl_mimepart;  /* Mime part context. */
 
 /*
  * NAME curl_mime_init()
@@ -2491,10 +2499,11 @@ struct curl_slist {
  * subsequent attempt to change it will result in a CURLSSLSET_TOO_LATE.
  */
 
-typedef struct {
+struct curl_ssl_backend {
   curl_sslbackend id;
   const char *name;
-} curl_ssl_backend;
+};
+typedef struct curl_ssl_backend curl_ssl_backend;
 
 typedef enum {
   CURLSSLSET_OK = 0,
@@ -2746,7 +2755,7 @@ typedef enum {
    from above. */
 #define CURLVERSION_NOW CURLVERSION_SEVENTH
 
-typedef struct {
+struct curl_version_info_data {
   CURLversion age;          /* age of the returned struct */
   const char *version;      /* LIBCURL_VERSION */
   unsigned int version_num; /* LIBCURL_VERSION_NUM */
@@ -2790,7 +2799,8 @@ typedef struct {
   const char *capath;          /* the built-in default CURLOPT_CAPATH, might
                                   be NULL */
 
-} curl_version_info_data;
+};
+typedef struct curl_version_info_data curl_version_info_data;
 
 #define CURL_VERSION_IPV6         (1<<0)  /* IPv6-enabled */
 #define CURL_VERSION_KERBEROS4    (1<<1)  /* Kerberos V4 auth is supported

@@ -113,7 +113,7 @@ static CURLcode ftp_parse_url_path(struct connectdata *conn);
 static CURLcode ftp_regular_transfer(struct connectdata *conn, bool *done);
 #ifndef CURL_DISABLE_VERBOSE_STRINGS
 static void ftp_pasv_verbose(struct connectdata *conn,
-                             Curl_addrinfo *ai,
+                             struct Curl_addrinfo *ai,
                              char *newhost, /* ascii version */
                              int port);
 #endif
@@ -221,6 +221,7 @@ static void close_secondarysocket(struct connectdata *conn)
     conn->sock[SECONDARYSOCKET] = CURL_SOCKET_BAD;
   }
   conn->bits.tcpconnect[SECONDARYSOCKET] = FALSE;
+  conn->bits.proxy_ssl_connected[SECONDARYSOCKET] = FALSE;
 }
 
 /*
@@ -815,6 +816,7 @@ static int ftp_domore_getsock(struct connectdata *conn, curl_socket_t *socks)
 
   if(FTP_STOP == ftpc->state) {
     int bits = GETSOCK_READSOCK(0);
+    bool any = FALSE;
 
     /* if stopped and still in this state, then we're also waiting for a
        connect on the secondary connection */
@@ -829,10 +831,11 @@ static int ftp_domore_getsock(struct connectdata *conn, curl_socket_t *socks)
         if(conn->tempsock[i] != CURL_SOCKET_BAD) {
           socks[s] = conn->tempsock[i];
           bits |= GETSOCK_WRITESOCK(s++);
+          any = TRUE;
         }
       }
     }
-    else {
+    if(!any) {
       socks[1] = conn->sock[SECONDARYSOCKET];
       bits |= GETSOCK_WRITESOCK(1) | GETSOCK_READSOCK(1);
     }
@@ -913,7 +916,7 @@ static CURLcode ftp_state_use_port(struct connectdata *conn,
   char myhost[MAX_IPADR_LEN + 1] = "";
 
   struct Curl_sockaddr_storage ss;
-  Curl_addrinfo *res, *ai;
+  struct Curl_addrinfo *res, *ai;
   curl_socklen_t sslen;
   char hbuf[NI_MAXHOST];
   struct sockaddr *sa = (struct sockaddr *)&ss;
@@ -3231,9 +3234,9 @@ static CURLcode ftp_done(struct connectdata *conn, CURLcode status,
     }
 
     if(conn->ssl[SECONDARYSOCKET].use) {
-      /* The secondary socket is using SSL so we must close down that part
-         first before we close the socket for real */
-      Curl_ssl_close(conn, SECONDARYSOCKET);
+      /* The secondary socket used SSL so we must close down that part first
+         before we close the socket for real */
+      result = Curl_ssl_shutdown(conn, SECONDARYSOCKET);
 
       /* Note that we keep "use" set to TRUE since that (next) connection is
          still requested to use SSL */
@@ -3442,7 +3445,7 @@ static CURLcode ftp_nb_type(struct connectdata *conn,
 #ifndef CURL_DISABLE_VERBOSE_STRINGS
 static void
 ftp_pasv_verbose(struct connectdata *conn,
-                 Curl_addrinfo *ai,
+                 struct Curl_addrinfo *ai,
                  char *newhost, /* ascii version */
                  int port)
 {

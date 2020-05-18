@@ -240,11 +240,14 @@ struct ssl_config_data {
   long certverifyresult; /* result from the certificate verification */
   char *CRLfile;   /* CRL to check certificate revocation */
   char *issuercert;/* optional issuer certificate filename */
+  struct curl_blob *issuercert_blob;
   curl_ssl_ctx_callback fsslctx; /* function to initialize ssl ctx */
   void *fsslctxp;        /* parameter for call back */
   char *cert; /* client certificate file name */
+  struct curl_blob *cert_blob;
   char *cert_type; /* format for certificate (default: PEM)*/
   char *key; /* private key file name */
+  struct curl_blob *key_blob;
   char *key_type; /* format for private key (default: PEM) */
   char *key_passwd; /* plain text private key password */
 #ifdef USE_TLS_SRP
@@ -613,8 +616,8 @@ struct SingleRequest {
   enum expect100 exp100;        /* expect 100 continue state */
   enum upgrade101 upgr101;      /* 101 upgrade state */
 
-  struct contenc_writer_s *writer_stack;  /* Content unencoding stack. */
-                                          /* See sec 3.5, RFC2616. */
+  /* Content unencoding stack. See sec 3.5, RFC2616. */
+  struct contenc_writer *writer_stack;
   time_t timeofdoc;
   long bodywrites;
   char *buf;
@@ -875,8 +878,8 @@ struct connectdata {
   /* 'ip_addr' is the particular IP we connected to. It points to a struct
      within the DNS cache, so this pointer is only valid as long as the DNS
      cache entry remains locked. It gets unlocked in Curl_done() */
-  Curl_addrinfo *ip_addr;
-  Curl_addrinfo *tempaddr[2]; /* for happy eyeballs */
+  struct Curl_addrinfo *ip_addr;
+  struct Curl_addrinfo *tempaddr[2]; /* for happy eyeballs */
 
   /* 'ip_addr_str' is the ip_addr data as a human readable string.
      It remains available as long as the connection does, which is longer than
@@ -1580,6 +1583,15 @@ enum dupstring {
   STRING_LAST /* not used, just an end-of-list marker */
 };
 
+enum dupblob {
+  BLOB_CERT_ORIG,
+  BLOB_CERT_PROXY,
+  BLOB_KEY_ORIG,
+  BLOB_KEY_PROXY,
+  BLOB_SSL_ISSUERCERT_ORIG,
+  BLOB_LAST
+};
+
 /* callback that gets called when this easy handle is completed within a multi
    handle.  Only used for internally created transfers, like for example
    DoH. */
@@ -1711,6 +1723,7 @@ struct UserDefined {
   long new_directory_perms; /* Permissions to use when creating remote dirs */
   long ssh_auth_types;   /* allowed SSH auth types */
   char *str[STRING_LAST]; /* array of strings, pointing to allocated memory */
+  struct curl_blob *blobs[BLOB_LAST];
   unsigned int scope_id;  /* Scope id for IPv6 */
   long allowed_protocols;
   long redir_protocols;
