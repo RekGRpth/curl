@@ -81,7 +81,7 @@
 */
 #define RESP_TIMEOUT (120*1000)
 
-/* Max string intput length is a precaution against abuse and to detect junk
+/* Max string input length is a precaution against abuse and to detect junk
    input easier and better. */
 #define CURL_MAX_INPUT_LENGTH 8000000
 
@@ -1227,17 +1227,6 @@ typedef enum {
     RTSPREQ_RECEIVE,
     RTSPREQ_LAST /* last in list */
 } Curl_RtspReq;
-
-/*
- * Values that are generated, temporary or calculated internally for a
- * "session handle" must be defined within the 'struct UrlState'.  This struct
- * will be used within the Curl_easy struct. When the 'Curl_easy'
- * struct is cloned, this data MUST NOT be copied.
- *
- * Remember that any "state" information goes globally for the curl handle.
- * Session-data MUST be put in the connectdata struct and here.  */
-#define MAX_CURL_USER_LENGTH 256
-#define MAX_CURL_PASSWORD_LENGTH 256
 
 struct auth {
   unsigned long want;  /* Bitmask set to the authentication methods wanted by
