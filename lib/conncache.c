@@ -143,12 +143,15 @@ static void hashkey(struct connectdata *conn, char *buf,
   const char *hostname;
   long port = conn->remote_port;
 
+#ifndef CURL_DISABLE_PROXY
   if(conn->bits.httpproxy && !conn->bits.tunnel_proxy) {
     hostname = conn->http_proxy.host.name;
     port = conn->port;
   }
-  else if(conn->bits.conn_to_host)
-    hostname = conn->conn_to_host.name;
+  else
+#endif
+    if(conn->bits.conn_to_host)
+      hostname = conn->conn_to_host.name;
   else
     hostname = conn->host.name;
 
@@ -531,6 +534,11 @@ Curl_conncache_extract_oldest(struct Curl_easy *data)
 void Curl_conncache_close_all_connections(struct conncache *connc)
 {
   struct connectdata *conn;
+  char buffer[READBUFFER_MIN + 1];
+  if(!connc->closure_handle)
+    return;
+  connc->closure_handle->state.buffer = buffer;
+  connc->closure_handle->set.buffer_size = READBUFFER_MIN;
 
   conn = conncache_find_first_connection(connc);
   while(conn) {
@@ -547,6 +555,7 @@ void Curl_conncache_close_all_connections(struct conncache *connc)
     conn = conncache_find_first_connection(connc);
   }
 
+  connc->closure_handle->state.buffer = NULL;
   if(connc->closure_handle) {
     SIGPIPE_VARIABLE(pipe_st);
     sigpipe_ignore(connc->closure_handle, &pipe_st);

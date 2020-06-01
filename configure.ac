@@ -1282,12 +1282,14 @@ dnl Check if the operating system allows programs to write to their own argv[]
 dnl **********************************************************************
 
 AC_MSG_CHECKING([if argv can be written to])
-CURL_RUN_IFELSE([
-int main(int argc, char ** argv) {
-    argv[0][0] = ' ';
-    return (argv[0][0] == ' ')?0:1;
+CURL_RUN_IFELSE([[
+int main(int argc, char **argv)
+{
+  (void)argc;
+  argv[0][0] = ' ';
+  return (argv[0][0] == ' ')?0:1;
 }
-],[
+]],[
   curl_cv_writable_argv=yes
 ],[
   curl_cv_writable_argv=no
@@ -4059,6 +4061,19 @@ AC_CHECK_TYPE(sa_family_t,
 [
 #ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
+#endif
+])
+
+# check for suseconds_t
+AC_CHECK_TYPE([suseconds_t],[
+  AC_DEFINE(HAVE_SUSECONDS_T, 1,
+    [Define to 1 if suseconds_t is an available type.])
+], ,[
+#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
 #endif
 ])
 

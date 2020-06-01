@@ -659,14 +659,18 @@ static CURLcode multi_done(struct Curl_easy *data,
   }
   else {
     char buffer[256];
+    const char *host =
+#ifndef CURL_DISABLE_PROXY
+      conn->bits.socksproxy ?
+      conn->socks_proxy.host.dispname :
+      conn->bits.httpproxy ? conn->http_proxy.host.dispname :
+#endif
+      conn->bits.conn_to_host ? conn->conn_to_host.dispname :
+      conn->host.dispname;
     /* create string before returning the connection */
     msnprintf(buffer, sizeof(buffer),
               "Connection #%ld to host %s left intact",
-              conn->connection_id,
-              conn->bits.socksproxy ? conn->socks_proxy.host.dispname :
-              conn->bits.httpproxy ? conn->http_proxy.host.dispname :
-              conn->bits.conn_to_host ? conn->conn_to_host.dispname :
-              conn->host.dispname);
+              conn->connection_id, host);
     /* the connection is no longer in use by this transfer */
     CONNCACHE_UNLOCK(data);
     if(Curl_conncache_return_conn(data, conn)) {
@@ -678,6 +682,7 @@ static CURLcode multi_done(struct Curl_easy *data,
       data->state.lastconnect = NULL;
   }
 
+  Curl_safefree(data->state.buffer);
   Curl_free_request_state(data);
   return result;
 }
@@ -866,8 +871,10 @@ static int waitconnect_getsock(struct connectdata *conn,
   int rc = 0;
 
 #ifdef USE_SSL
+#ifndef CURL_DISABLE_PROXY
   if(CONNECT_FIRSTSOCKET_PROXY_SSL())
     return Curl_ssl_getsock(conn, sock);
+#endif
 #endif
 
   if(SOCKS_STATE(conn->cnnct.state))
@@ -1489,7 +1496,7 @@ static CURLcode protocol_connect(struct connectdata *conn,
   }
 
   if(!conn->bits.protoconnstart) {
-
+#ifndef CURL_DISABLE_PROXY
     result = Curl_proxy_connect(conn, FIRSTSOCKET);
     if(result)
       return result;
@@ -1503,7 +1510,7 @@ static CURLcode protocol_connect(struct connectdata *conn,
       /* when using an HTTP tunnel proxy, await complete tunnel establishment
          before proceeding further. Return CURLE_OK so we'll be called again */
       return CURLE_OK;
-
+#endif
     if(conn->handler->connect_it) {
       /* is there a protocol-specific connect() procedure? */
 
@@ -1520,6 +1527,20 @@ static CURLcode protocol_connect(struct connectdata *conn,
   }
 
   return result; /* pass back status */
+}
+
+/*
+ * preconnect() is called immediately before a connect starts. When a redirect
+ * is followed, this is then called multiple times during a single transfer.
+ */
+static CURLcode preconnect(struct Curl_easy *data)
+{
+  if(!data->state.buffer) {
+    data->state.buffer = malloc(data->set.buffer_size + 1);
+    if(!data->state.buffer)
+      return CURLE_OUT_OF_MEMORY;
+  }
+  return CURLE_OK;
 }
 
 
@@ -1629,6 +1650,11 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
 
     case CURLM_STATE_CONNECT:
       /* Connect. We want to get a connection identifier filled in. */
+      /* init this transfer. */
+      result = preconnect(data);
+      if(result)
+        break;
+
       Curl_pgrsTime(data, TIMER_STARTSINGLE);
       if(data->set.timeout)
         Curl_expire(data, data->set.timeout, EXPIRE_TIMEOUT);
@@ -1686,9 +1712,12 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
       const char *hostname;
 
       DEBUGASSERT(conn);
+#ifndef CURL_DISABLE_PROXY
       if(conn->bits.httpproxy)
         hostname = conn->http_proxy.host.name;
-      else if(conn->bits.conn_to_host)
+      else
+#endif
+        if(conn->bits.conn_to_host)
         hostname = conn->conn_to_host.name;
       else
         hostname = conn->host.name;
@@ -1754,7 +1783,7 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
       /* this is HTTP-specific, but sending CONNECT to a proxy is HTTP... */
       DEBUGASSERT(data->conn);
       result = Curl_http_connect(data->conn, &protocol_connected);
-
+#ifndef CURL_DISABLE_PROXY
       if(data->conn->bits.proxy_connect_closed) {
         rc = CURLM_CALL_MULTI_PERFORM;
         /* connect back to proxy again */
@@ -1762,15 +1791,20 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
         multi_done(data, CURLE_OK, FALSE);
         multistate(data, CURLM_STATE_CONNECT);
       }
-      else if(!result) {
-        if((data->conn->http_proxy.proxytype != CURLPROXY_HTTPS ||
-           data->conn->bits.proxy_ssl_connected[FIRSTSOCKET]) &&
-           Curl_connect_complete(data->conn)) {
-          rc = CURLM_CALL_MULTI_PERFORM;
-          /* initiate protocol connect phase */
-          multistate(data, CURLM_STATE_SENDPROTOCONNECT);
+      else
+#endif
+        if(!result) {
+          if(
+#ifndef CURL_DISABLE_PROXY
+            (data->conn->http_proxy.proxytype != CURLPROXY_HTTPS ||
+             data->conn->bits.proxy_ssl_connected[FIRSTSOCKET]) &&
+#endif
+            Curl_connect_complete(data->conn)) {
+            rc = CURLM_CALL_MULTI_PERFORM;
+            /* initiate protocol connect phase */
+            multistate(data, CURLM_STATE_SENDPROTOCONNECT);
+          }
         }
-      }
       else if(result)
         stream_error = TRUE;
       break;
@@ -1782,17 +1816,25 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
       result = Curl_is_connected(data->conn, FIRSTSOCKET, &connected);
       if(connected && !result) {
 #ifndef CURL_DISABLE_HTTP
-        if((data->conn->http_proxy.proxytype == CURLPROXY_HTTPS &&
-            !data->conn->bits.proxy_ssl_connected[FIRSTSOCKET]) ||
-           Curl_connect_ongoing(data->conn)) {
+        if(
+#ifndef CURL_DISABLE_PROXY
+          (data->conn->http_proxy.proxytype == CURLPROXY_HTTPS &&
+           !data->conn->bits.proxy_ssl_connected[FIRSTSOCKET]) ||
+#endif
+          Curl_connect_ongoing(data->conn)) {
           multistate(data, CURLM_STATE_WAITPROXYCONNECT);
           break;
         }
 #endif
         rc = CURLM_CALL_MULTI_PERFORM;
-        multistate(data, data->conn->bits.tunnel_proxy?
+#ifndef CURL_DISABLE_PROXY
+        multistate(data,
+                   data->conn->bits.tunnel_proxy?
                    CURLM_STATE_WAITPROXYCONNECT:
                    CURLM_STATE_SENDPROTOCONNECT);
+#else
+        multistate(data, CURLM_STATE_SENDPROTOCONNECT);
+#endif
       }
       else if(result) {
         /* failure detected */
@@ -2058,7 +2100,7 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
       char *newurl = NULL;
       bool retry = FALSE;
       bool comeback = FALSE;
-
+      DEBUGASSERT(data->state.buffer);
       /* check if over send speed */
       send_timeout_ms = 0;
       if(data->set.max_send_speed > 0)
