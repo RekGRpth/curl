@@ -69,7 +69,7 @@ int Curl_blockread_all(struct connectdata *conn, /* connection data */
       break;
     }
     if(!timeout_ms)
-      timeout_ms = TIME_T_MAX;
+      timeout_ms = TIMEDIFF_T_MAX;
     if(SOCKET_READABLE(sockfd, timeout_ms) <= 0) {
       result = ~CURLE_OK;
       break;
@@ -934,6 +934,13 @@ CURLcode Curl_SOCKS5(const char *proxy_user,
     else if(socksreq[3] == 4) {
       /* IPv6 */
       len = 4 + 16 + 2;
+    }
+    else if(socksreq[3] == 1) {
+      len = 4 + 4 + 2;
+    }
+    else {
+      failf(data, "SOCKS5 reply has wrong address type.");
+      return CURLE_COULDNT_CONNECT;
     }
 
     /* At this point we already read first 10 bytes */
