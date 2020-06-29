@@ -966,7 +966,7 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
         if(*p) {
           /* if there's anything more than a plain decimal number */
           rc = sscanf(p, " - %6s", lrange);
-          *p = 0; /* zero terminate to make str2unum() work below */
+          *p = 0; /* null-terminate to make str2unum() work below */
         }
         else
           rc = 0;
@@ -1517,7 +1517,7 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
         /* Automatic referer requested, this may be combined with a
            set initial one */
         config->autoreferer = TRUE;
-        *ptr = 0; /* zero terminate here */
+        *ptr = 0; /* null-terminate here */
       }
       else
         config->autoreferer = FALSE;
@@ -1817,6 +1817,11 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
       }
       break;
     case 'i':
+      if(config->content_disposition) {
+        warnf(global,
+              "--include and --remote-header-name cannot be combined.\n");
+        return PARAM_BAD_USE;
+      }
       config->show_headers = toggle; /* show the headers as well in the
                                         general output stream */
       break;
@@ -2302,6 +2307,9 @@ ParameterError parse_args(struct GlobalConfig *global, int argc,
       result = getparameter("--url", orig_opt, &used, global,
                             config);
     }
+
+    if(!result)
+      curlx_unicodefree(orig_opt);
   }
 
   if(result && result != PARAM_HELP_REQUESTED &&

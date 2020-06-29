@@ -420,6 +420,17 @@ CURLcode Curl_close(struct Curl_easy **datap)
     Curl_share_unlock(data, CURL_LOCK_DATA_SHARE);
   }
 
+  Curl_safefree(data->state.aptr.proxyuserpwd);
+  Curl_safefree(data->state.aptr.uagent);
+  Curl_safefree(data->state.aptr.userpwd);
+  Curl_safefree(data->state.aptr.accept_encoding);
+  Curl_safefree(data->state.aptr.te);
+  Curl_safefree(data->state.aptr.rangeline);
+  Curl_safefree(data->state.aptr.ref);
+  Curl_safefree(data->state.aptr.host);
+  Curl_safefree(data->state.aptr.cookiehost);
+  Curl_safefree(data->state.aptr.rtsp_transport);
+
 #ifndef CURL_DISABLE_DOH
   Curl_dyn_free(&data->req.doh.probe[0].serverdoh);
   Curl_dyn_free(&data->req.doh.probe[1].serverdoh);
@@ -727,16 +738,6 @@ static void conn_free(struct connectdata *conn)
   Curl_safefree(conn->passwd);
   Curl_safefree(conn->sasl_authzid);
   Curl_safefree(conn->options);
-  Curl_safefree(conn->allocptr.proxyuserpwd);
-  Curl_safefree(conn->allocptr.uagent);
-  Curl_safefree(conn->allocptr.userpwd);
-  Curl_safefree(conn->allocptr.accept_encoding);
-  Curl_safefree(conn->allocptr.te);
-  Curl_safefree(conn->allocptr.rangeline);
-  Curl_safefree(conn->allocptr.ref);
-  Curl_safefree(conn->allocptr.host);
-  Curl_safefree(conn->allocptr.cookiehost);
-  Curl_safefree(conn->allocptr.rtsp_transport);
   Curl_dyn_free(&conn->trailer);
   Curl_safefree(conn->host.rawalloc); /* host name buffer */
   Curl_safefree(conn->conn_to_host.rawalloc); /* host name buffer */
@@ -1897,23 +1898,32 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
   if(result)
     return result;
 
-  uc = curl_url_get(uh, CURLUPART_USER, &data->state.up.user,
-                    CURLU_URLDECODE);
+  /* we don't use the URL API's URL decoder option here since it rejects
+     control codes and we want to allow them for some schemes in the user and
+     password fields */
+  uc = curl_url_get(uh, CURLUPART_USER, &data->state.up.user, 0);
   if(!uc) {
-    conn->user = strdup(data->state.up.user);
-    if(!conn->user)
-      return CURLE_OUT_OF_MEMORY;
+    char *decoded;
+    result = Curl_urldecode(NULL, data->state.up.user, 0, &decoded, NULL,
+                            conn->handler->flags&PROTOPT_USERPWDCTRL ?
+                            REJECT_ZERO : REJECT_CTRL);
+    if(result)
+      return result;
+    conn->user = decoded;
     conn->bits.user_passwd = TRUE;
   }
   else if(uc != CURLUE_NO_USER)
     return Curl_uc_to_curlcode(uc);
 
-  uc = curl_url_get(uh, CURLUPART_PASSWORD, &data->state.up.password,
-                    CURLU_URLDECODE);
+  uc = curl_url_get(uh, CURLUPART_PASSWORD, &data->state.up.password, 0);
   if(!uc) {
-    conn->passwd = strdup(data->state.up.password);
-    if(!conn->passwd)
-      return CURLE_OUT_OF_MEMORY;
+    char *decoded;
+    result = Curl_urldecode(NULL, data->state.up.password, 0, &decoded, NULL,
+                            conn->handler->flags&PROTOPT_USERPWDCTRL ?
+                            REJECT_ZERO : REJECT_CTRL);
+    if(result)
+      return result;
+    conn->passwd = decoded;
     conn->bits.user_passwd = TRUE;
   }
   else if(uc != CURLUE_NO_PASSWORD)
@@ -2376,10 +2386,10 @@ static CURLcode parse_proxy_auth(struct Curl_easy *data,
 
   if(proxyuser)
     result = Curl_urldecode(data, proxyuser, 0, &conn->http_proxy.user, NULL,
-                            FALSE);
+                            REJECT_ZERO);
   if(!result && proxypasswd)
     result = Curl_urldecode(data, proxypasswd, 0, &conn->http_proxy.passwd,
-                            NULL, FALSE);
+                            NULL, REJECT_ZERO);
   return result;
 }
 
@@ -3888,10 +3898,10 @@ CURLcode Curl_setup_conn(struct connectdata *conn,
    * protocol.
    */
   if(data->set.str[STRING_USERAGENT]) {
-    Curl_safefree(conn->allocptr.uagent);
-    conn->allocptr.uagent =
+    Curl_safefree(data->state.aptr.uagent);
+    data->state.aptr.uagent =
       aprintf("User-Agent: %s\r\n", data->set.str[STRING_USERAGENT]);
-    if(!conn->allocptr.uagent)
+    if(!data->state.aptr.uagent)
       return CURLE_OUT_OF_MEMORY;
   }
 
@@ -3983,6 +3993,11 @@ CURLcode Curl_connect(struct Curl_easy *data,
 CURLcode Curl_init_do(struct Curl_easy *data, struct connectdata *conn)
 {
   struct SingleRequest *k = &data->req;
+
+  /* if this is a pushed stream, we need this: */
+  CURLcode result = Curl_preconnect(data);
+  if(result)
+    return result;
 
   if(conn) {
     conn->bits.do_more = FALSE; /* by default there's no curl_do_more() to
