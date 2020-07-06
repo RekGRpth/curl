@@ -3174,7 +3174,7 @@ static CURLcode resolve_server(struct Curl_easy *data,
   else {
     /* this is a fresh connect */
     int rc;
-    struct Curl_dns_entry *hostaddr;
+    struct Curl_dns_entry *hostaddr = NULL;
 
 #ifdef USE_UNIX_SOCKETS
     if(conn->unix_domain_socket) {
@@ -3613,6 +3613,7 @@ static CURLcode create_conn(struct Curl_easy *data,
     data->set.str[STRING_SSL_CIPHER13_LIST_ORIG];
   data->set.ssl.primary.pinned_key =
     data->set.str[STRING_SSL_PINNEDPUBLICKEY_ORIG];
+  data->set.ssl.primary.cert_blob = data->set.blobs[BLOB_CERT_ORIG];
 
 #ifndef CURL_DISABLE_PROXY
   data->set.proxy_ssl.primary.CApath = data->set.str[STRING_SSL_CAPATH_PROXY];
@@ -3626,6 +3627,7 @@ static CURLcode create_conn(struct Curl_easy *data,
     data->set.str[STRING_SSL_CIPHER13_LIST_PROXY];
   data->set.proxy_ssl.primary.pinned_key =
     data->set.str[STRING_SSL_PINNEDPUBLICKEY_PROXY];
+  data->set.proxy_ssl.primary.cert_blob = data->set.blobs[BLOB_CERT_PROXY];
   data->set.proxy_ssl.CRLfile = data->set.str[STRING_SSL_CRLFILE_PROXY];
   data->set.proxy_ssl.issuercert = data->set.str[STRING_SSL_ISSUERCERT_PROXY];
   data->set.proxy_ssl.cert = data->set.str[STRING_CERT_PROXY];
@@ -3659,7 +3661,7 @@ static CURLcode create_conn(struct Curl_easy *data,
   data->set.ssl.issuercert_blob = data->set.blobs[BLOB_SSL_ISSUERCERT_ORIG];
 
   if(!Curl_clone_primary_ssl_config(&data->set.ssl.primary,
-     &conn->ssl_config)) {
+                                    &conn->ssl_config)) {
     result = CURLE_OUT_OF_MEMORY;
     goto out;
   }
