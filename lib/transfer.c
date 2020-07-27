@@ -1442,8 +1442,9 @@ CURLcode Curl_pretransfer(struct Curl_easy *data)
 
   if(!data->change.url && data->set.uh) {
     CURLUcode uc;
+    free(data->set.str[STRING_SET_URL]);
     uc = curl_url_get(data->set.uh,
-                        CURLUPART_URL, &data->set.str[STRING_SET_URL], 0);
+                      CURLUPART_URL, &data->set.str[STRING_SET_URL], 0);
     if(uc) {
       failf(data, "No URL set!");
       return CURLE_URL_MALFORMAT;
