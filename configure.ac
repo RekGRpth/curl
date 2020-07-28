@@ -147,6 +147,7 @@ dnl initialize all the info variables
     curl_ssh_msg="no      (--with-{libssh,libssh2})"
    curl_zlib_msg="no      (--with-zlib)"
  curl_brotli_msg="no      (--with-brotli)"
+   curl_zstd_msg="no      (--with-zstd)"
     curl_gss_msg="no      (--with-gssapi)"
 curl_tls_srp_msg="no      (--enable-tls-srp)"
     curl_res_msg="default (--enable-ares / --enable-threaded-resolver)"
@@ -2380,6 +2381,7 @@ if test -z "$ssl_backends" -o "x$OPT_WOLFSSL" != xno; then
       OPT_WOLFSSL=""
     fi
 
+    dnl try pkg-config magic
     CURL_CHECK_PKGCONFIG(wolfssl, [$wolfpkg])
     AC_MSG_NOTICE([Check dir $wolfpkg])
 
@@ -2398,9 +2400,12 @@ if test -z "$ssl_backends" -o "x$OPT_WOLFSSL" != xno; then
       wolfssllibpath=`echo $addld | $SED -e 's/^-L//'`
     else
       addlib=-lwolfssl
-      addld=-L$OPT_WOLFSSL/lib$libsuff
-      addcflags=-I$OPT_WOLFSSL/include
-      wolfssllibpath=$OPT_WOLFSSL/lib$libsuff
+      dnl use system defaults if user does not supply a path
+      if test -n "$OPT_WOLFSSL"; then
+        addld=-L$OPT_WOLFSSL/lib$libsuff
+        addcflags=-I$OPT_WOLFSSL/include
+        wolfssllibpath=$OPT_WOLFSSL/lib$libsuff
+      fi
     fi
 
     if test "x$USE_WOLFSSL" != "xyes"; then
@@ -2452,7 +2457,7 @@ if test -z "$ssl_backends" -o "x$OPT_WOLFSSL" != xno; then
       dnl wolfssl/ctaocrypt/types.h needs SIZEOF_LONG_LONG defined!
       AX_COMPILE_CHECK_SIZEOF(long long)
 
-      LIBS="-lwolfssl -lm $LIBS"
+      LIBS="$addlib -lm $LIBS"
 
       dnl Recent WolfSSL versions build without SSLv3 by default
       dnl WolfSSL needs configure --enable-opensslextra to have *get_peer*
@@ -2464,12 +2469,19 @@ if test -z "$ssl_backends" -o "x$OPT_WOLFSSL" != xno; then
 
       dnl if this symbol is present, we want the include path to include the
       dnl OpenSSL API root as well
-      AC_CHECK_FUNC(wolfSSL_DES_set_odd_parity,
+      AC_CHECK_FUNC(wolfSSL_DES_ecb_encrypt,
         [
-            AC_DEFINE(HAVE_WOLFSSL_DES_SET_ODD_PARITY, 1,
-                      [if you have wolfSSL_DES_set_odd_parity])
-            CPPFLAGS="$addcflags/wolfssl $CPPFLAGS"
-            AC_MSG_NOTICE([Add $addcflags/wolfssl to CPPFLAGS])
+            AC_DEFINE(HAVE_WOLFSSL_DES_ECB_ENCRYPT, 1,
+                      [if you have wolfSSL_DES_ecb_encrypt])
+            if test -n "$addcflags"; then
+              CPPFLAGS="$addcflags/wolfssl $CPPFLAGS"
+              AC_MSG_NOTICE([Add $addcflags/wolfssl to CPPFLAGS])
+            else
+              dnl user didn't give a path, so guess/hope they installed wolfssl
+              dnl headers to system default location
+              CPPFLAGS="-I$includedir/wolfssl $CPPFLAGS"
+              AC_MSG_NOTICE([Add $includedir/wolfssl to CPPFLAGS])
+            fi
             WOLFSSL_NTLM=1
         ]
         )
