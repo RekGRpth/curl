@@ -74,7 +74,7 @@
 #include "warnless.h"
 #include "conncache.h"
 #include "multihandle.h"
-#include "system_win32.h"
+#include "version_win32.h"
 #include "quic.h"
 #include "socks.h"
 
@@ -934,10 +934,10 @@ CURLcode Curl_is_connected(struct connectdata *conn,
 
         return CURLE_OK;
       }
-      infof(data, "Connection failed\n");
     }
-    else if(rc & CURL_CSELECT_ERR)
+    else if(rc & CURL_CSELECT_ERR) {
       (void)verifyconnect(conn->tempsock[i], &error);
+    }
 
     /*
      * The connection failed here, we should attempt to connect to the "next
@@ -1085,8 +1085,8 @@ void Curl_sndbufset(curl_socket_t sockfd)
   static int detectOsState = DETECT_OS_NONE;
 
   if(detectOsState == DETECT_OS_NONE) {
-    if(Curl_verify_windows_version(6, 0, PLATFORM_WINNT,
-                                   VERSION_GREATER_THAN_EQUAL))
+    if(curlx_verify_windows_version(6, 0, PLATFORM_WINNT,
+                                    VERSION_GREATER_THAN_EQUAL))
       detectOsState = DETECT_OS_VISTA_OR_LATER;
     else
       detectOsState = DETECT_OS_PREVISTA;
