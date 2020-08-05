@@ -159,6 +159,8 @@
  18.20 host name sections in config files
  18.21 retry on the redirected-to URL
  18.22 Add flag to specify download directory
+ 18.23 Set the modification date on an uploaded file
+ 18.24 Use multiple parallel transfers for a single download
 
  19. Build
  19.1 roffit
@@ -1115,6 +1117,34 @@ that doesn't exist on the server, just like --ftp-create-dirs.
  A directory name to basically prepend to the file name -O and -o use. Saves
  user from having to manually "cd" to the directory. Especially useful for
  command lines with multiple -O and different download directories.
+
+18.23 Set the modification date on an uploaded file
+
+ For SFTP and posssibly FTP, curl could offer an option to set the
+ modification time for the uploaded file.
+
+ See https://github.com/curl/curl/issues/5768
+
+18.24 Use multiple parallel transfers for a single download
+
+ To enhance transfer speed, downloading a single URL can be split up into
+ multiple separate range downloads that get combined into a single final
+ result.
+
+ An ideal implementation would not use a specified number of parallel
+ transfers, but curl could:
+ - First start getting the full file as transfer A
+ - If after N seconds have passed and the transfer is expected to continue for
+   M seconds or more, add a new transfer (B) that asks for the second half of
+   A's content (and stop A at the middle).
+ - If splitting up the work improves the transfer rate, it could then be done
+   again. Then again, etc up to a limit.
+
+ This way, if transfer B fails (because Range: isn't supported) it will let
+ transfer A remain the single one. N and M could be set to some sensible
+ defaults.
+
+ See https://github.com/curl/curl/issues/5774
 
 19. Build
 
