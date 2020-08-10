@@ -127,10 +127,6 @@ my $HOST6IP="[::1]";      # address on which the test server listens
 my $CLIENTIP="127.0.0.1"; # address which curl uses for incoming connections
 my $CLIENT6IP="[::1]";    # address which curl uses for incoming connections
 
-my $base = 8990; # base port number
-my $minport;     # minimum used port number
-my $maxport;     # maximum used port number
-
 my $noport="[not running]";
 
 my $NOLISTENPORT=47;     # port number we use for a local non-listening service
@@ -272,8 +268,8 @@ my $has_openssl;    # built with a lib using an OpenSSL-like API
 my $has_gnutls;     # built with GnuTLS
 my $has_nss;        # built with NSS
 my $has_wolfssl;    # built with wolfSSL
-my $has_winssl;     # built with WinSSL    (Secure Channel aka Schannel)
-my $has_darwinssl;  # built with DarwinSSL (Secure Transport)
+my $has_schannel;   # built with Schannel
+my $has_sectransp;  # built with Secure Transport
 my $has_boringssl;  # built with BoringSSL
 my $has_libressl;   # built with libressl
 my $has_mbedtls;    # built with mbedTLS
@@ -2405,7 +2401,7 @@ sub runsocksserver {
 # start the dict server
 #
 sub rundictserver {
-    my ($verbose, $alt, $port) = @_;
+    my ($verbose, $alt) = @_;
     my $proto = "dict";
     my $ip = $HOSTIP;
     my $ipvnum = 4;
@@ -2442,38 +2438,35 @@ sub rundictserver {
     $flags .= "--verbose 1 " if($debugprotocol);
     $flags .= "--pidfile \"$pidfile\" --logfile \"$logfile\" ";
     $flags .= "--id $idnum " if($idnum > 1);
-    $flags .= "--port $port --srcdir \"$srcdir\" ";
+    $flags .= "--srcdir \"$srcdir\" ";
     $flags .= "--host $HOSTIP";
 
-    my $cmd = "$srcdir/dictserver.py $flags";
-    my ($dictpid, $pid2) = startnew($cmd, $pidfile, 15, 0);
+    my $port = 29000;
+    my ($dictpid, $pid2);
+    for(1 .. 10) {
+        $port += int(rand(900));
+        my $aflags = "--port $port $flags";
+        my $cmd = "$srcdir/dictserver.py $aflags";
+        ($dictpid, $pid2) = startnew($cmd, $pidfile, 15, 0);
 
-    if($dictpid <= 0 || !pidexists($dictpid)) {
-        # it is NOT alive
-        logmsg "RUN: failed to start the $srvrname server\n";
-        stopserver($server, "$pid2");
-        displaylogs($testnumcheck);
-        $doesntrun{$pidfile} = 1;
-        return (0,0);
+        if($dictpid <= 0 || !pidexists($dictpid)) {
+            # it is NOT alive
+            logmsg "RUN: failed to start the $srvrname server\n";
+            stopserver($server, "$pid2");
+            displaylogs($testnumcheck);
+            $doesntrun{$pidfile} = 1;
+            $dictpid = $pid2 = 0;
+            next;
+        }
+        $doesntrun{$pidfile} = 0;
+
+        if($verbose) {
+            logmsg "RUN: $srvrname server PID $dictpid port $port\n";
+        }
+        last;
     }
 
-    # Server is up. Verify that we can speak to it.
-    my $pid3 = verifyserver($proto, $ipvnum, $idnum, $ip, $port);
-    if(!$pid3) {
-        logmsg "RUN: $srvrname server failed verification\n";
-        # failed to talk to it properly. Kill the server and return failure
-        stopserver($server, "$dictpid $pid2");
-        displaylogs($testnumcheck);
-        $doesntrun{$pidfile} = 1;
-        return (0,0);
-    }
-    $pid2 = $pid3;
-
-    if($verbose) {
-        logmsg "RUN: $srvrname server is now running PID $dictpid\n";
-    }
-
-    return ($dictpid, $pid2);
+    return ($dictpid, $pid2, $port);
 }
 
 #######################################################################
@@ -2795,7 +2788,6 @@ sub setupfeatures {
     $feature{"alt-svc"} = $has_altsvc;
     $feature{"brotli"} = $has_brotli;
     $feature{"crypto"} = $has_crypto;
-    $feature{"DarwinSSL"} = $has_darwinssl; # alias
     $feature{"debug"} = $debug_build;
     $feature{"getrlimit"} = $has_getrlimit;
     $feature{"GnuTLS"} = $has_gnutls;
@@ -2817,8 +2809,8 @@ sub setupfeatures {
     $feature{"NTLM_WB"} = $has_ntlm_wb;
     $feature{"OpenSSL"} = $has_openssl || $has_libressl || $has_boringssl;
     $feature{"PSL"} = $has_psl;
-    $feature{"Schannel"} = $has_winssl; # alias
-    $feature{"sectransp"} = $has_darwinssl;
+    $feature{"Schannel"} = $has_schannel;
+    $feature{"sectransp"} = $has_sectransp;
     $feature{"SPNEGO"} = $has_spnego;
     $feature{"SSL"} = $has_ssl;
     $feature{"SSLpinning"} = $has_sslpinning;
@@ -2829,7 +2821,6 @@ sub setupfeatures {
     $feature{"unittest"} = $debug_build;
     $feature{"unix-sockets"} = $has_unix;
     $feature{"win32"} = $has_win32;
-    $feature{"WinSSL"} = $has_winssl;
     $feature{"zstd"} = $has_zstd;
 
     # make each protocol an enabled "feature"
@@ -2914,7 +2905,7 @@ sub checksystem {
                 $has_mingw = 1 if ($curl =~ /-pc-mingw32/);
             }
            if ($libcurl =~ /(winssl|schannel)/i) {
-               $has_winssl=1;
+               $has_schannel=1;
                $has_sslpinning=1;
            }
            elsif ($libcurl =~ /openssl/i) {
@@ -2934,7 +2925,7 @@ sub checksystem {
                $has_sslpinning=1;
            }
            elsif ($libcurl =~ /securetransport/i) {
-               $has_darwinssl=1;
+               $has_sectransp=1;
                $has_sslpinning=1;
            }
            elsif ($libcurl =~ /BoringSSL/i) {
@@ -3217,7 +3208,6 @@ sub checksystem {
                    $run_event_based?"event-based ":"");
     logmsg sprintf("%s\n", $libtool?"Libtool ":"");
     logmsg ("* Seed: $randseed\n");
-    logmsg ("* Port range: $minport-$maxport\n");
 
     if($verbose) {
         if($has_unix) {
@@ -4960,7 +4950,7 @@ sub startservers {
         }
         elsif($what eq "dict") {
             if(!$run{'dict'}) {
-                ($pid, $pid2) = rundictserver($verbose, "", $DICTPORT);
+                ($pid, $pid2, $DICTPORT) = rundictserver($verbose, "");
                 if($pid <= 0) {
                     return "failed starting DICT server";
                 }
@@ -5209,12 +5199,6 @@ while(@ARGV) {
         # verbose output
         $verbose=1;
     }
-    elsif($ARGV[0] =~ /^-b(.*)/) {
-        my $portno=$1;
-        if($portno =~ s/(\d+)$//) {
-            $base = int $1;
-        }
-    }
     elsif ($ARGV[0] eq "-c") {
         # use this path to curl instead of default
         $DBGCURL=$CURL="\"$ARGV[1]\"";
@@ -5336,7 +5320,6 @@ while(@ARGV) {
 Usage: runtests.pl [options] [test selection(s)]
   -a       continue even if a test fails
   -am      automake style output PASS/FAIL: [number] [name]
-  -bN      use base port number N for test servers (default $base)
   -c path  use this curl executable
   -d       display server debug info
   -e       event-based execution
@@ -5484,11 +5467,7 @@ if ($gdbthis) {
     }
 }
 
-$minport         = $base; # original base port number
-$DICTPORT        = $base++; # DICT port
 $HTTPUNIXPATH    = "http$$.sock"; # HTTP server Unix domain socket path
-
-$maxport         = $base-1; # updated base port number
 
 #######################################################################
 # clear and create logging directory:
