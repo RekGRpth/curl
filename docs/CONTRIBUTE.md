@@ -108,7 +108,7 @@ submit a small description of your fix or your new features with every
 contribution so that it can be swiftly added to the package documentation.
 
 The documentation is always made in man pages (nroff formatted) or plain
-ASCII files. All HTML files on the web site and in the release archives are
+ASCII files. All HTML files on the website and in the release archives are
 generated from the nroff/ASCII versions.
 
 ### Test Cases
@@ -275,3 +275,6 @@ For Windows:
 
  - [https://gnuwin32.sourceforge.io/packages/patch.htm](https://gnuwin32.sourceforge.io/packages/patch.htm)
  - [https://gnuwin32.sourceforge.io/packages/diffutils.htm](https://gnuwin32.sourceforge.io/packages/diffutils.htm)
+
+### Useful resources
+* [Webinar on getting code into cURL](https://www.youtube.com/watch?v=QmZ3W1d6LQI)
