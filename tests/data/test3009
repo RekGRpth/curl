@@ -1,26 +1,25 @@
 <testcase>
 <info>
 <keywords>
-HTTP
-HTTP GET
+-O
 </keywords>
 </info>
-
 #
 # Server-side
 <reply>
-<data>
+<data nocheck="yes">
 HTTP/1.1 200 OK
 Date: Thu, 09 Nov 2010 14:49:00 GMT
 Server: test-server/fake
 Last-Modified: Tue, 13 Jun 2000 12:10:00 GMT
-ETag: "21025-dc7-11111"
+ETag: "21025-dc7-39462498"
 Accept-Ranges: bytes
-Content-Length: 0
+Content-Length: 6
 Connection: close
 Content-Type: text/html
 Funny-head: yesyes
 
+-foo-
 </data>
 </reply>
 
@@ -30,11 +29,14 @@ Funny-head: yesyes
 <server>
 http
 </server>
+<features>
+http
+</features>
 <name>
-Both --etag-compare and -save store new Etag using non-existing file
+--output-dir a non-existing directory
 </name>
-<command>
-http://%HOSTIP:%HTTPPORT/344 --etag-compare log/etag344 --etag-save log/etag344
+<command option="no-output,no-include">
+http://%HOSTIP:%HTTPPORT/this/is/the/3009 -O --output-dir %PWD/not-there
 </command>
 </client>
 
@@ -45,14 +47,13 @@ http://%HOSTIP:%HTTPPORT/344 --etag-compare log/etag344 --etag-save log/etag344
 ^User-Agent:.*
 </strip>
 <protocol>
-GET /344 HTTP/1.1
+GET /this/is/the/3009 HTTP/1.1
 Host: %HOSTIP:%HTTPPORT
 Accept: */*
-If-None-Match: ""
 
 </protocol>
-<file name="log/etag344">
-"21025-dc7-11111"
-</file>
+<errorcode>
+23
+</errorcode>
 </verify>
 </testcase>

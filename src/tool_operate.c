@@ -922,7 +922,7 @@ static CURLcode single_transfer(struct GlobalConfig *global,
 
           if((PARAM_OK == file2string(&etag_from_file, file)) &&
              etag_from_file) {
-            header = aprintf("If-None-Match: \"%s\"", etag_from_file);
+            header = aprintf("If-None-Match: %s", etag_from_file);
             Curl_safefree(etag_from_file);
           }
           else
@@ -1050,6 +1050,15 @@ static CURLcode single_transfer(struct GlobalConfig *global,
             }
           }
 
+          if(config->output_dir) {
+            char *d = aprintf("%s/%s", config->output_dir, per->outfile);
+            if(!d) {
+              result = CURLE_WRITE_ERROR;
+              break;
+            }
+            free(per->outfile);
+            per->outfile = d;
+          }
           /* Create the directory hierarchy, if not pre-existent to a multiple
              file output call */
 
@@ -1696,7 +1705,7 @@ static CURLcode single_transfer(struct GlobalConfig *global,
             char *home;
             char *file;
             result = CURLE_FAILED_INIT;
-            home = homedir();
+            home = homedir(NULL);
             if(home) {
               file = aprintf("%s/.ssh/known_hosts", home);
               if(file) {

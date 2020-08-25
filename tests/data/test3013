@@ -1,26 +1,28 @@
 <testcase>
 <info>
 <keywords>
-HTTP
-HTTP GET
+-O
+-J
+--output-dir
 </keywords>
 </info>
-
 #
 # Server-side
 <reply>
-<data>
-HTTP/1.1 304 OK
+<data nocheck="yes">
+HTTP/1.1 200 OK
 Date: Thu, 09 Nov 2010 14:49:00 GMT
 Server: test-server/fake
 Last-Modified: Tue, 13 Jun 2000 12:10:00 GMT
 ETag: "21025-dc7-39462498"
 Accept-Ranges: bytes
-Content-Length: 0
+Content-Length: 6
 Connection: close
+Content-Disposition: inline; filename="MMM3013MMM"
 Content-Type: text/html
 Funny-head: yesyes
 
+-foo-
 </data>
 </reply>
 
@@ -30,14 +32,14 @@ Funny-head: yesyes
 <server>
 http
 </server>
+<features>
+http
+</features>
 <name>
-Check if --etag-compare set correct etag in header
+Two --output-dir with --next in between
 </name>
-<file name="log/etag342">
-"21025-dc7-39462498"
-</file>
-<command>
-http://%HOSTIP:%HTTPPORT/342 --etag-compare log/etag342
+<command option="no-output,no-include">
+http://%HOSTIP:%HTTPPORT/this/is/the/3013 -O --output-dir %PWD/log http://%HOSTIP:%HTTPPORT/another/3013 -o second3013 --output-dir %PWD/log
 </command>
 </client>
 
@@ -48,11 +50,20 @@ http://%HOSTIP:%HTTPPORT/342 --etag-compare log/etag342
 ^User-Agent:.*
 </strip>
 <protocol>
-GET /342 HTTP/1.1
+GET /this/is/the/3013 HTTP/1.1
 Host: %HOSTIP:%HTTPPORT
 Accept: */*
-If-None-Match: "21025-dc7-39462498"
+
+GET /another/3013 HTTP/1.1
+Host: %HOSTIP:%HTTPPORT
+Accept: */*
 
 </protocol>
+<file name="log/3013">
+-foo-
+</file>
+<file2 name="log/second3013">
+-foo-
+</file2>
 </verify>
 </testcase>
