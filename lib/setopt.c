@@ -720,6 +720,9 @@ CURLcode Curl_vsetopt(struct Curl_easy *data, CURLoption option, va_list param)
     argptr = (char *)va_arg(param, void *);
     if(argptr) {
       struct curl_slist *cl;
+      /* general protection against mistakes and abuse */
+      if(strlen(argptr) > CURL_MAX_INPUT_LENGTH)
+        return CURLE_BAD_FUNCTION_ARGUMENT;
       /* append the cookie file name to the list of file names, and deal with
          them later */
       cl = curl_slist_append(data->change.cookielist, argptr);
@@ -804,6 +807,9 @@ CURLcode Curl_vsetopt(struct Curl_easy *data, CURLoption option, va_list param)
         /* if cookie engine was not running, activate it */
         data->cookies = Curl_cookie_init(data, NULL, NULL, TRUE);
 
+      /* general protection against mistakes and abuse */
+      if(strlen(argptr) > CURL_MAX_INPUT_LENGTH)
+        return CURLE_BAD_FUNCTION_ARGUMENT;
       argptr = strdup(argptr);
       if(!argptr || !data->cookies) {
         result = CURLE_OUT_OF_MEMORY;
@@ -2235,6 +2241,14 @@ CURLcode Curl_vsetopt(struct Curl_easy *data, CURLoption option, va_list param)
     break;
 #endif
 
+  case CURLOPT_SSL_EC_CURVES:
+    /*
+     * Set accepted curves in SSL connection setup.
+     * Specify colon-delimited list of curve algorithm names.
+     */
+    result = Curl_setstropt(&data->set.str[STRING_SSL_EC_CURVES],
+                            va_arg(param, char *));
+    break;
 #endif
   case CURLOPT_IPRESOLVE:
     arg = va_arg(param, long);

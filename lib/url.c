@@ -219,9 +219,8 @@ static const struct Curl_handler * const protocols[] = {
 #endif
 #endif
 
-#if !defined(CURL_DISABLE_SMB) && defined(USE_NTLM) && \
-   (CURL_SIZEOF_CURL_OFF_T > 4) && \
-   (!defined(USE_WINDOWS_SSPI) || defined(USE_WIN32_CRYPTO))
+#if !defined(CURL_DISABLE_SMB) && defined(USE_CURL_NTLM_CORE) && \
+   (CURL_SIZEOF_CURL_OFF_T > 4)
   &Curl_handler_smb,
 #ifdef USE_SSL
   &Curl_handler_smbs,
@@ -1023,7 +1022,7 @@ static void prune_dead_connections(struct Curl_easy *data)
       Curl_conncache_remove_conn(data, prune.extracted, TRUE);
 
       /* disconnect it */
-      (void)Curl_disconnect(data, prune.extracted, /* dead_connection */TRUE);
+      (void)Curl_disconnect(data, prune.extracted, TRUE);
     }
     CONNCACHE_LOCK(data);
     data->state.conn_cache->last_cleanup = now;
@@ -1124,6 +1123,12 @@ ConnectionExists(struct Curl_easy *data,
       if(check->bits.connect_only || check->bits.close)
         /* connect-only or to-be-closed connections will not be reused */
         continue;
+
+      if(extract_if_dead(check, data)) {
+        /* disconnect it */
+        (void)Curl_disconnect(data, check, TRUE);
+        continue;
+      }
 
       if(bundle->multiuse == BUNDLE_MULTIPLEX)
         multiplexed = CONN_INUSE(check);
@@ -3615,6 +3620,7 @@ static CURLcode create_conn(struct Curl_easy *data,
   data->set.ssl.primary.pinned_key =
     data->set.str[STRING_SSL_PINNEDPUBLICKEY_ORIG];
   data->set.ssl.primary.cert_blob = data->set.blobs[BLOB_CERT_ORIG];
+  data->set.ssl.primary.curves = data->set.str[STRING_SSL_EC_CURVES];
 
 #ifndef CURL_DISABLE_PROXY
   data->set.proxy_ssl.primary.CApath = data->set.str[STRING_SSL_CAPATH_PROXY];
@@ -3756,8 +3762,7 @@ static CURLcode create_conn(struct Curl_easy *data,
         CONNCACHE_UNLOCK(data);
 
         if(conn_candidate)
-          (void)Curl_disconnect(data, conn_candidate,
-                                /* dead_connection */ FALSE);
+          (void)Curl_disconnect(data, conn_candidate, FALSE);
         else {
           infof(data, "No more connections allowed to host %s: %zu\n",
                 bundlehost, max_host_connections);
@@ -3777,8 +3782,7 @@ static CURLcode create_conn(struct Curl_easy *data,
       /* The cache is full. Let's see if we can kill a connection. */
       conn_candidate = Curl_conncache_extract_oldest(data);
       if(conn_candidate)
-        (void)Curl_disconnect(data, conn_candidate,
-                              /* dead_connection */ FALSE);
+        (void)Curl_disconnect(data, conn_candidate, FALSE);
       else {
         infof(data, "No connections available in cache\n");
         connections_available = FALSE;
