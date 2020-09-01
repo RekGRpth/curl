@@ -231,7 +231,7 @@ static const struct Curl_handler * const protocols[] = {
   &Curl_handler_rtsp,
 #endif
 
-#ifdef CURL_ENABLE_MQTT
+#ifndef CURL_DISABLE_MQTT
   &Curl_handler_mqtt,
 #endif
 
