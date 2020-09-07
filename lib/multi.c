@@ -190,7 +190,7 @@ static void mstate(struct Curl_easy *data, CURLMstate state
  */
 
 struct Curl_sh_entry {
-  struct curl_hash transfers; /* hash of transfers using this socket */
+  struct Curl_hash transfers; /* hash of transfers using this socket */
   unsigned int action;  /* what combined action READ/WRITE this socket waits
                            for */
   void *socketp; /* settable by users with curl_multi_assign() */
@@ -204,7 +204,7 @@ struct Curl_sh_entry {
 #define SH_WRITE 2
 
 /* look up a given socket in the socket hash, skip invalid sockets */
-static struct Curl_sh_entry *sh_getentry(struct curl_hash *sh,
+static struct Curl_sh_entry *sh_getentry(struct Curl_hash *sh,
                                          curl_socket_t s)
 {
   if(s != CURL_SOCKET_BAD) {
@@ -238,7 +238,7 @@ static void trhash_dtor(void *nada)
 
 
 /* make sure this socket is present in the hash for this handle */
-static struct Curl_sh_entry *sh_addentry(struct curl_hash *sh,
+static struct Curl_sh_entry *sh_addentry(struct Curl_hash *sh,
                                          curl_socket_t s)
 {
   struct Curl_sh_entry *there = sh_getentry(sh, s);
@@ -273,7 +273,7 @@ static struct Curl_sh_entry *sh_addentry(struct curl_hash *sh,
 
 /* delete the given socket + handle from the hash */
 static void sh_delentry(struct Curl_sh_entry *entry,
-                        struct curl_hash *sh, curl_socket_t s)
+                        struct Curl_hash *sh, curl_socket_t s)
 {
   Curl_hash_destroy(&entry->transfers);
 
@@ -325,7 +325,7 @@ static size_t hash_fd(void *key, size_t key_length, size_t slots_num)
  * per call."
  *
  */
-static int sh_init(struct curl_hash *hash, int hashsize)
+static int sh_init(struct Curl_hash *hash, int hashsize)
 {
   return Curl_hash_init(hash, hashsize, hash_fd, fd_key_compare,
                         sh_freeentry);
@@ -722,7 +722,7 @@ CURLMcode curl_multi_remove_handle(struct Curl_multi *multi,
   struct Curl_easy *easy = data;
   bool premature;
   bool easy_owns_conn;
-  struct curl_llist_element *e;
+  struct Curl_llist_element *e;
 
   /* First, make some basic checks that the CURLM handle is a good handle */
   if(!GOOD_MULTI_HANDLE(multi))
@@ -2675,7 +2675,7 @@ CURLMsg *curl_multi_info_read(struct Curl_multi *multi, int *msgs_in_queue)
      !multi->in_callback &&
      Curl_llist_count(&multi->msglist)) {
     /* there is one or more messages in the list */
-    struct curl_llist_element *e;
+    struct Curl_llist_element *e;
 
     /* extract the head of the list to return */
     e = multi->msglist.head;
@@ -2905,15 +2905,15 @@ static CURLMcode add_next_timeout(struct curltime now,
                                   struct Curl_easy *d)
 {
   struct curltime *tv = &d->state.expiretime;
-  struct curl_llist *list = &d->state.timeoutlist;
-  struct curl_llist_element *e;
+  struct Curl_llist *list = &d->state.timeoutlist;
+  struct Curl_llist_element *e;
   struct time_node *node = NULL;
 
   /* move over the timeout list for this specific handle and remove all
      timeouts that are now passed tense and store the next pending
      timeout in *tv */
   for(e = list->head; e;) {
-    struct curl_llist_element *n = e->next;
+    struct Curl_llist_element *n = e->next;
     timediff_t diff;
     node = (struct time_node *)e->ptr;
     diff = Curl_timediff(node->time, now);
@@ -2983,8 +2983,8 @@ static CURLMcode multi_socket(struct Curl_multi *multi,
          and just move on. */
       ;
     else {
-      struct curl_hash_iterator iter;
-      struct curl_hash_element *he;
+      struct Curl_hash_iterator iter;
+      struct Curl_hash_element *he;
 
       /* the socket can be shared by many transfers, iterate */
       Curl_hash_start_iterate(&entry->transfers, &iter);
@@ -3267,8 +3267,8 @@ void Curl_update_timer(struct Curl_multi *multi)
 static void
 multi_deltimeout(struct Curl_easy *data, expire_id eid)
 {
-  struct curl_llist_element *e;
-  struct curl_llist *timeoutlist = &data->state.timeoutlist;
+  struct Curl_llist_element *e;
+  struct Curl_llist *timeoutlist = &data->state.timeoutlist;
   /* find and remove the specific node from the list */
   for(e = timeoutlist->head; e; e = e->next) {
     struct time_node *n = (struct time_node *)e->ptr;
@@ -3291,11 +3291,11 @@ multi_addtimeout(struct Curl_easy *data,
                  struct curltime *stamp,
                  expire_id eid)
 {
-  struct curl_llist_element *e;
+  struct Curl_llist_element *e;
   struct time_node *node;
-  struct curl_llist_element *prev = NULL;
+  struct Curl_llist_element *prev = NULL;
   size_t n;
-  struct curl_llist *timeoutlist = &data->state.timeoutlist;
+  struct Curl_llist *timeoutlist = &data->state.timeoutlist;
 
   node = &data->state.expires[eid];
 
@@ -3422,7 +3422,7 @@ void Curl_expire_clear(struct Curl_easy *data)
   if(nowp->tv_sec || nowp->tv_usec) {
     /* Since this is an cleared time, we must remove the previous entry from
        the splay tree */
-    struct curl_llist *list = &data->state.timeoutlist;
+    struct Curl_llist *list = &data->state.timeoutlist;
     int rc;
 
     rc = Curl_splayremovebyaddr(multi->timetree,
@@ -3493,7 +3493,7 @@ void Curl_multiuse_state(struct connectdata *conn,
 
 static void process_pending_handles(struct Curl_multi *multi)
 {
-  struct curl_llist_element *e = multi->pending.head;
+  struct Curl_llist_element *e = multi->pending.head;
   if(e) {
     struct Curl_easy *data = e->ptr;
 

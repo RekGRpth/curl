@@ -395,11 +395,8 @@ CURLcode Curl_close(struct Curl_easy **datap)
   Curl_dyn_free(&data->state.headerb);
   Curl_safefree(data->state.ulbuf);
   Curl_flush_cookies(data, TRUE);
-#ifdef USE_ALTSVC
   Curl_altsvc_save(data, data->asi, data->set.str[STRING_ALTSVC]);
-  Curl_altsvc_cleanup(data->asi);
-  data->asi = NULL;
-#endif
+  Curl_altsvc_cleanup(&data->asi);
 #if !defined(CURL_DISABLE_HTTP) && !defined(CURL_DISABLE_CRYPTO_AUTH)
   Curl_http_auth_cleanup_digest(data);
 #endif
@@ -1078,7 +1075,7 @@ ConnectionExists(struct Curl_easy *data,
                                       &hostbundle);
   if(bundle) {
     /* Max pipe length is zero (unlimited) for multiplexed connections */
-    struct curl_llist_element *curr;
+    struct Curl_llist_element *curr;
 
     infof(data, "Found bundle for host %s: %p [%s]\n",
           hostbundle, (void *)bundle, (bundle->multiuse == BUNDLE_MULTIPLEX ?
@@ -2560,6 +2557,9 @@ static CURLcode create_conn_helper_init_proxy(struct connectdata *conn)
     conn->bits.socksproxy = FALSE;
     conn->bits.proxy_user_passwd = FALSE;
     conn->bits.tunnel_proxy = FALSE;
+    /* CURLPROXY_HTTPS does not have its own flag in conn->bits, yet we need
+       to signal that CURLPROXY_HTTPS is not used for this connection */
+    conn->http_proxy.proxytype = CURLPROXY_HTTP;
   }
 
 out:
