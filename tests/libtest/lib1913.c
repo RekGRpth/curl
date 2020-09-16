@@ -1,5 +1,3 @@
-#ifndef HEADER_CURL_TOOL_WRITEOUT_JSON_H
-#define HEADER_CURL_TOOL_WRITEOUT_JSON_H
 /***************************************************************************
  *                                  _   _ ____  _
  *  Project                     ___| | | |  _ \| |
@@ -7,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -21,10 +19,30 @@
  * KIND, either express or implied.
  *
  ***************************************************************************/
-#include "tool_setup.h"
-#include "tool_writeout.h"
+#include "test.h"
 
-void ourWriteOutJSON(const struct writeoutvar mappings[], CURL *curl,
-                     struct per_transfer *per, FILE *stream);
+#include "testutil.h"
+#include "warnless.h"
+#include "memdebug.h"
 
-#endif /* HEADER_CURL_TOOL_WRITEOUT_H */
+int test(char *URL)
+{
+  CURLcode ret = CURLE_OK;
+  CURL *hnd;
+  start_test_timing();
+
+  curl_global_init(CURL_GLOBAL_ALL);
+
+  hnd = curl_easy_init();
+  if(hnd) {
+    curl_easy_setopt(hnd, CURLOPT_URL, URL);
+    curl_easy_setopt(hnd, CURLOPT_NOBODY, 1L);
+    if(libtest_arg2)
+      /* test1914 sets this extra arg */
+      curl_easy_setopt(hnd, CURLOPT_FILETIME, 1L);
+    ret = curl_easy_perform(hnd);
+    curl_easy_cleanup(hnd);
+  }
+  curl_global_cleanup();
+  return (int)ret;
+}
