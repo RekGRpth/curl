@@ -1095,6 +1095,7 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
   bool ufds_malloc = FALSE;
 #else
   struct pollfd pre_poll;
+  WSANETWORKEVENTS wsa_events;
   DEBUGASSERT(multi->wsa_event != WSA_INVALID_EVENT);
 #endif
 
@@ -1182,9 +1183,9 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
 #endif
         if(bitmap & GETSOCK_READSOCK(i)) {
 #ifdef USE_WINSOCK
-          if(SOCKET_READABLE(sockbunch[i], 0) > 0)
+          if(timeout_ms && SOCKET_READABLE(sockbunch[i], 0) > 0)
             timeout_ms = 0;
-          mask |= (FD_READ|FD_ACCEPT|FD_CLOSE);
+          mask |= FD_READ|FD_ACCEPT|FD_CLOSE;
 #else
           ufds[nfds].fd = sockbunch[i];
           ufds[nfds].events = POLLIN;
@@ -1194,9 +1195,9 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
         }
         if(bitmap & GETSOCK_WRITESOCK(i)) {
 #ifdef USE_WINSOCK
-          if(SOCKET_WRITABLE(sockbunch[i], 0) > 0)
+          if(timeout_ms && SOCKET_WRITABLE(sockbunch[i], 0) > 0)
             timeout_ms = 0;
-          mask |= (FD_WRITE|FD_CONNECT|FD_CLOSE);
+          mask |= FD_WRITE|FD_CONNECT|FD_CLOSE;
 #else
           ufds[nfds].fd = sockbunch[i];
           ufds[nfds].events = POLLOUT;
@@ -1220,34 +1221,34 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
   /* Add external file descriptions from poll-like struct curl_waitfd */
   for(i = 0; i < extra_nfds; i++) {
 #ifdef USE_WINSOCK
-    long events = 0;
+    long mask = 0;
     extra_fds[i].revents = 0;
     pre_poll.fd = extra_fds[i].fd;
     pre_poll.events = 0;
     pre_poll.revents = 0;
     if(extra_fds[i].events & CURL_WAIT_POLLIN) {
-      events |= (FD_READ|FD_ACCEPT|FD_CLOSE);
+      mask |= FD_READ|FD_ACCEPT|FD_CLOSE;
       pre_poll.events |= POLLIN;
     }
     if(extra_fds[i].events & CURL_WAIT_POLLPRI) {
-      events |= FD_OOB;
+      mask |= FD_OOB;
       pre_poll.events |= POLLPRI;
     }
     if(extra_fds[i].events & CURL_WAIT_POLLOUT) {
-      events |= (FD_WRITE|FD_CONNECT|FD_CLOSE);
+      mask |= FD_WRITE|FD_CONNECT|FD_CLOSE;
       pre_poll.events |= POLLOUT;
     }
     if(Curl_poll(&pre_poll, 1, 0) > 0) {
       if(pre_poll.revents & POLLIN)
         extra_fds[i].revents |= CURL_WAIT_POLLIN;
-      if(pre_poll.revents & POLLOUT)
-        extra_fds[i].revents |= CURL_WAIT_POLLOUT;
       if(pre_poll.revents & POLLPRI)
         extra_fds[i].revents |= CURL_WAIT_POLLPRI;
+      if(pre_poll.revents & POLLOUT)
+        extra_fds[i].revents |= CURL_WAIT_POLLOUT;
       if(extra_fds[i].revents)
         timeout_ms = 0;
     }
-    if(WSAEventSelect(extra_fds[i].fd, multi->wsa_event, events) != 0)
+    if(WSAEventSelect(extra_fds[i].fd, multi->wsa_event, mask) != 0)
       return CURLM_INTERNAL_ERROR;
 #else
     ufds[nfds].fd = extra_fds[i].fd;
@@ -1295,18 +1296,17 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
       for(i = 0; i < extra_nfds; i++) {
         unsigned short mask = 0;
 #ifdef USE_WINSOCK
-        WSANETWORKEVENTS events = {0};
+        wsa_events.lNetworkEvents = 0;
         mask = extra_fds[i].revents;
         if(WSAEnumNetworkEvents(extra_fds[i].fd, multi->wsa_event,
-                                &events) == 0) {
-          if(events.lNetworkEvents & (FD_READ|FD_ACCEPT|FD_CLOSE))
+                                &wsa_events) == 0) {
+          if(wsa_events.lNetworkEvents & (FD_READ|FD_ACCEPT|FD_CLOSE))
             mask |= CURL_WAIT_POLLIN;
-          if(events.lNetworkEvents & (FD_WRITE|FD_CONNECT|FD_CLOSE))
+          if(wsa_events.lNetworkEvents & (FD_WRITE|FD_CONNECT|FD_CLOSE))
             mask |= CURL_WAIT_POLLOUT;
-          if(events.lNetworkEvents & FD_OOB)
+          if(wsa_events.lNetworkEvents & FD_OOB)
             mask |= CURL_WAIT_POLLPRI;
-
-          if(ret && events.lNetworkEvents != 0)
+          if(ret && wsa_events.lNetworkEvents != 0)
             retcode++;
         }
         WSAEventSelect(extra_fds[i].fd, multi->wsa_event, 0);
@@ -1320,7 +1320,6 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
         if(r & POLLPRI)
           mask |= CURL_WAIT_POLLPRI;
 #endif
-
         extra_fds[i].revents = mask;
       }
 
@@ -1334,13 +1333,13 @@ static CURLMcode Curl_multi_wait(struct Curl_multi *multi,
 
           for(i = 0; i < MAX_SOCKSPEREASYHANDLE; i++) {
             if(bitmap & (GETSOCK_READSOCK(i) | GETSOCK_WRITESOCK(i))) {
-              WSANETWORKEVENTS events = {0};
+              wsa_events.lNetworkEvents = 0;
               if(WSAEnumNetworkEvents(sockbunch[i], multi->wsa_event,
-                                      &events) == 0) {
-                if(ret && events.lNetworkEvents != 0)
+                                      &wsa_events) == 0) {
+                if(ret && wsa_events.lNetworkEvents != 0)
                   retcode++;
               }
-              if(ret && !timeout_ms && !events.lNetworkEvents) {
+              if(ret && !timeout_ms && wsa_events.lNetworkEvents == 0) {
                 if((bitmap & GETSOCK_READSOCK(i)) &&
                    SOCKET_READABLE(sockbunch[i], 0) > 0)
                   retcode++;
