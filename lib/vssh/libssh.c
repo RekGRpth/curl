@@ -164,6 +164,7 @@ const struct Curl_handler Curl_handler_scp = {
   ZERO_NULL,                    /* connection_check */
   PORT_SSH,                     /* defport */
   CURLPROTO_SCP,                /* protocol */
+  CURLPROTO_SCP,                /* family */
   PROTOPT_DIRLOCK | PROTOPT_CLOSEACTION | PROTOPT_NOURLQUERY    /* flags */
 };
 
@@ -214,6 +215,7 @@ const struct Curl_handler Curl_handler_sftp = {
   ZERO_NULL,                            /* connection_check */
   PORT_SSH,                             /* defport */
   CURLPROTO_SFTP,                       /* protocol */
+  CURLPROTO_SFTP,                       /* family */
   PROTOPT_DIRLOCK | PROTOPT_CLOSEACTION
   | PROTOPT_NOURLQUERY                  /* flags */
 };
