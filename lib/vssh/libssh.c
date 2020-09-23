@@ -190,6 +190,7 @@ const struct Curl_handler Curl_handler_ssh = {
   ZERO_NULL,                    /* connection_check */
   PORT_SSH,                     /* defport */
   CURLPROTO_SSH,                /* protocol */
+  CURLPROTO_SSH,                /* family */
   PROTOPT_DIRLOCK | PROTOPT_CLOSEACTION | PROTOPT_NOURLQUERY    /* flags */
 };
 
