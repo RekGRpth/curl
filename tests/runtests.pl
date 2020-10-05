@@ -163,6 +163,7 @@ my $TELNETPORT=$noport;  # TELNET server port with negotiation
 my $HTTPUNIXPATH;        # HTTP server Unix domain socket path
 
 my $SSHSRVMD5 = "[uninitialized]"; # MD5 of ssh server public key
+my $VERSION;             # curl's reported version number
 
 my $srcdir = $ENV{'srcdir'} || '.';
 my $CURL="../src/curl".exe_ext('TOOL'); # what curl executable to run on the tests
@@ -2863,8 +2864,9 @@ sub checksystem {
     for(@version) {
         chomp;
 
-        if($_ =~ /^curl/) {
+        if($_ =~ /^curl ([^ ]*)/) {
             $curl = $_;
+            $VERSION = $1;
             $curl =~ s/^(.*)(libcurl.*)/$1/g;
 
             $libcurl = $2;
@@ -3261,6 +3263,7 @@ sub subVariables {
     $$thing =~ s/${prefix}CURL/$CURL/g;
     $$thing =~ s/${prefix}PWD/$pwd/g;
     $$thing =~ s/${prefix}POSIX_PWD/$posix_pwd/g;
+    $$thing =~ s/${prefix}VERSION/$VERSION/g;
 
     my $file_pwd = $pwd;
     if($file_pwd !~ /^\//) {
@@ -3303,6 +3306,20 @@ sub subBase64 {
         my $enc = encode_base64($d, "");
         # put the result into there
         $$thing =~ s/%%B64%%/$enc/;
+    }
+    # hex decode
+    if($$thing =~ s/%hex\[(.*)\]hex%/%%HEX%%/i) {
+        # decode %NN characters
+        my $d = $1;
+        $d =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+        $$thing =~ s/%%HEX%%/$d/;
+    }
+    if($$thing =~ s/%repeat\[(\d+) x (.*)\]%/%%REPEAT%%/i) {
+        # decode %NN characters
+        my ($d, $n) = ($2, $1);
+        $d =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg;
+        my $all = $d x $n;
+        $$thing =~ s/%%REPEAT%%/$all/;
     }
 }
 
