@@ -197,7 +197,6 @@ bin_SCRIPTS = curl-config
 SUBDIRS = lib src
 DIST_SUBDIRS = $(SUBDIRS) tests packages scripts include docs
 
-pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libcurl.pc
 
 # List of files required to generate VC IDE .dsp, .vcproj and .vcxproj files
@@ -329,6 +328,7 @@ checksrc:
 	(cd tests && $(MAKE) checksrc)
 	(cd include/curl && $(MAKE) checksrc)
 	(cd docs/examples && $(MAKE) checksrc)
+	(cd packages && $(MAKE) checksrc)
 
 .PHONY: vc-ide
 
