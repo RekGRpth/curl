@@ -9,7 +9,7 @@
 #
 # This software is licensed as described in the file COPYING, which
 # you should have received as part of this distribution. The terms
-# are also available at https://curl.haxx.se/docs/copyright.html.
+# are also available at https://curl.se/docs/copyright.html.
 #
 # You may opt to use, copy, modify, merge, publish, distribute and/or sell
 # copies of the Software, and permit persons to whom the Software is
@@ -24,7 +24,7 @@ dnl Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.57)
 
 dnl We don't know the version number "statically" so we use a dash here
-AC_INIT([curl], [-], [a suitable curl mailing list: https://curl.haxx.se/mail/])
+AC_INIT([curl], [-], [a suitable curl mailing list: https://curl.se/mail/])
 
 XC_OVR_ZZ50
 XC_OVR_ZZ60
@@ -148,7 +148,7 @@ AC_SUBST(VERSIONNUM)
 dnl Solaris pkgadd support definitions
 PKGADD_PKG="HAXXcurl"
 PKGADD_NAME="curl - a client that groks URLs"
-PKGADD_VENDOR="curl.haxx.se"
+PKGADD_VENDOR="curl.se"
 AC_SUBST(PKGADD_PKG)
 AC_SUBST(PKGADD_NAME)
 AC_SUBST(PKGADD_VENDOR)
@@ -4882,6 +4882,31 @@ AC_HELP_STRING([--disable-alt-svc],[Disable alt-svc support]),
        AC_MSG_RESULT(no)
 )
 
+dnl ************************************************************
+dnl switch on/off hsts
+dnl
+curl_hsts_msg="no      (--enable-hsts)";
+AC_MSG_CHECKING([whether to support HSTS])
+AC_ARG_ENABLE(hsts,
+AC_HELP_STRING([--enable-hsts],[Enable HSTS support])
+AC_HELP_STRING([--disable-hsts],[Disable HSTS support]),
+[ case "$enableval" in
+  no)
+       AC_MSG_RESULT(no)
+       ;;
+  *) AC_MSG_RESULT(yes)
+       curl_hsts_msg="enabled";
+       enable_hsts="yes"
+       ;;
+  esac ],
+       AC_MSG_RESULT(no)
+)
+
+if test "$enable_hsts" = "yes"; then
+  AC_DEFINE(USE_HSTS, 1, [to enable HSTS])
+  experimental="$experimental HSTS"
+fi
+
 dnl *************************************************************
 dnl check whether ECH support, if desired, is actually available
 dnl
@@ -4997,6 +5022,9 @@ fi
 
 if test "x$enable_altsvc" = "xyes"; then
   SUPPORT_FEATURES="$SUPPORT_FEATURES alt-svc"
+fi
+if test "x$enable_hsts" = "xyes"; then
+  SUPPORT_FEATURES="$SUPPORT_FEATURES HSTS"
 fi
 
 if test "x$CURL_DISABLE_CRYPTO_AUTH" != "x1" -a \

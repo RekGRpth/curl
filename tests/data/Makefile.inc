@@ -9,7 +9,7 @@
 #
 # This software is licensed as described in the file COPYING, which
 # you should have received as part of this distribution. The terms
-# are also available at https://curl.haxx.se/docs/copyright.html.
+# are also available at https://curl.se/docs/copyright.html.
 #
 # You may opt to use, copy, modify, merge, publish, distribute and/or sell
 # copies of the Software, and permit persons to whom the Software is
@@ -197,13 +197,14 @@ test1620 test1621 \
 test1630 test1631 test1632 test1633 \
 \
 test1650 test1651 test1652 test1653 test1654 test1655 \
+test1660 \
 \
 test1700 test1701 test1702 \
 \
 test1800 test1801 \
 \
                                     test1904 test1905 test1906 test1907 \
-test1908 test1909 test1910 test1911 test1912 test1913 test1914 \
+test1908 test1909 test1910 test1911 test1912 test1913 test1914 test1915 \
 \
 test2000 test2001 test2002 test2003 test2004 test2005 test2006 test2007 \
 test2008 test2009 test2010 test2011 test2012 test2013 test2014 test2015 \

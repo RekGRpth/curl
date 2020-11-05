@@ -9,7 +9,7 @@
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at https://curl.haxx.se/docs/copyright.html.
+ * are also available at https://curl.se/docs/copyright.html.
  *
  * You may opt to use, copy, modify, merge, publish, distribute and/or sell
  * copies of the Software, and permit persons to whom the Software is
@@ -78,6 +78,7 @@
 #include "mime.h"
 #include "strcase.h"
 #include "urlapi-int.h"
+#include "hsts.h"
 
 /* The last 3 #include files should be in this order */
 #include "curl_printf.h"
@@ -1529,6 +1530,7 @@ CURLcode Curl_pretransfer(struct Curl_easy *data)
     }
 #endif
     Curl_http2_init_state(&data->state);
+    Curl_hsts_loadcb(data, data->hsts);
   }
 
   return result;

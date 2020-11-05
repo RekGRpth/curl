@@ -1,21 +1,23 @@
-curl and libcurl 7.73.1
+curl and libcurl 7.74.0
 
  Public curl releases:         196
- Command line options:         234
- curl_easy_setopt() options:   278
+ Command line options:         235
+ curl_easy_setopt() options:   284
  Public functions in libcurl:  85
- Contributors:                 2277
+ Contributors:                 2278
 
 This release includes the following changes:
 
- o
+ o hsts: add support for Strict-Transport-Security [37]
 
 This release includes the following bugfixes:
 
+ o acinclude: detect manually set minimum macos/ipod version [46]
  o alt-svc: enable (in the build) by default [20]
  o checksrc: warn on empty line before open brace [13]
  o CI/appveyor: disable test 571 in two cmake builds [22]
  o CI/azure: improve on flakiness by avoiding libtool wrappers [7]
+ o CI/tests: enable test target on TravisCI for CMake builds [38]
  o CI/travis: add brotli and zstd to the libssh2 build [27]
  o cmake: call the feature unixsockets without dash [26]
  o cmake: make BUILD_TESTING dependent option [30]
@@ -29,7 +31,10 @@ This release includes the following bugfixes:
  o CURLOPT_NOBODY.3: fix typo [6]
  o CURLOPT_TCP_NODELAY.3: fix comment in example code [8]
  o CURLOPT_URL.3: clarify SCP/SFTP URLs are for uploads as well
+ o gnutls: fix memory leaks (certfields memory wasn't released) [41]
+ o header.d: mention the "Transfer-Encoding: chunked" handling [45]
  o http3: fix two build errors, silence warnings [10]
+ o http: pass correct header size to debug callback for chunked post [44]
  o libcurl.pc: make it relocatable [15]
  o libssh2: fix build with disabled proxy support [17]
  o libssh2: fix transport over HTTPS proxy [31]
@@ -46,61 +51,76 @@ This release includes the following bugfixes:
  o src/tool_filetime: disable -Wformat on mingw for this file [2]
  o strerror: use 'const' as the string should never be modified [18]
  o test122[12]: remove these two tests [1]
+ o tests: add missing global_init/cleanup calls [42]
+ o tests: fix some http/2 tests for older versions of nghttpx [47]
+ o tool_debug_cb: do not assume zero-terminated data
  o tool_help: make "output" description less confusing [21]
+ o tool_operate: --retry for HTTP 408 responses too [43]
  o tool_operate: bail out proper on errors during parallel transfers [29]
  o tool_operate: fix compiler warning when --libcurl is disabled [12]
+ o travis: use valgrind when running tests for debug builds [40]
  o urlapi: URL encode a '+' in the query part [14]
 
 This release includes the following known bugs:
 
- o see docs/KNOWN_BUGS (https://curl.haxx.se/docs/knownbugs.html)
+ o see docs/KNOWN_BUGS (https://curl.se/docs/knownbugs.html)
 
 This release would not have looked like this without help, code, reports and
 advice from friends like these:
 
   b9a1 on github, Baruch Siach, Basuke Suzuki, BrumBrum on hackerone,
-  Cristian Morales Vega, Daniel Stenberg, Dietmar Hauser, Emil Engler,
-  Jon Rumsey, José Joaquín Atria, Marcel Raad, Marc Hörsken,
-  Philipp Klaus Krause, Ray Satiro, Rui LIU, Sergei Nikulov,
-  Tom G. Christensen, Viktor Szakats,
-  (18 contributors)
+  Cristian Morales Vega, Daniel Stenberg, Dietmar Hauser, Dirk Wetter,
+  Emil Engler, hamstergene on github, Harry Sintonen, Jon Rumsey,
+  José Joaquín Atria, Marcel Raad, Marc Hörsken, Philipp Klaus Krause,
+  Ray Satiro, Rui LIU, Sergei Nikulov, Tom G. Christensen, Viktor Szakats,
+  (21 contributors)
 
         Thanks! (and sorry if I forgot to mention someone)
 
 References to bug reports and discussions on issues:
 
- [1] = https://curl.haxx.se/bug/?i=6080
- [2] = https://curl.haxx.se/bug/?i=6079
- [3] = https://curl.haxx.se/bug/?i=6102
- [4] = https://curl.haxx.se/bug/?i=6085
- [5] = https://curl.haxx.se/bug/?i=6083
- [6] = https://curl.haxx.se/bug/?i=6097
- [7] = https://curl.haxx.se/bug/?i=6049
- [8] = https://curl.haxx.se/bug/?i=6096
- [9] = https://curl.haxx.se/mail/lib-2020-10/0037.html
- [10] = https://curl.haxx.se/bug/?i=6093
- [11] = https://curl.haxx.se/bug/?i=6092
- [12] = https://curl.haxx.se/bug/?i=6095
- [13] = https://curl.haxx.se/bug/?i=6088
- [14] = https://curl.haxx.se/bug/?i=6086
- [15] = https://curl.haxx.se/bug/?i=6061
- [16] = https://curl.haxx.se/bug/?i=6053
- [17] = https://curl.haxx.se/bug/?i=6125
- [18] = https://curl.haxx.se/bug/?i=6068
- [19] = https://curl.haxx.se/bug/?i=6069
- [20] = https://curl.haxx.se/bug/?i=5868
- [21] = https://curl.haxx.se/bug/?i=6118
- [22] = https://curl.haxx.se/bug/?i=6119
- [23] = https://curl.haxx.se/bug/?i=6117
- [24] = https://curl.haxx.se/bug/?i=6116
- [25] = https://curl.haxx.se/bug/?i=6108
- [26] = https://curl.haxx.se/bug/?i=6108
- [27] = https://curl.haxx.se/bug/?i=6105
- [28] = https://curl.haxx.se/bug/?i=6145
- [29] = https://curl.haxx.se/bug/?i=6141
- [30] = https://curl.haxx.se/bug/?i=6072
- [31] = https://curl.haxx.se/bug/?i=6113
- [32] = https://curl.haxx.se/bug/?i=6134
- [33] = https://curl.haxx.se/bug/?i=6126
- [34] = https://curl.haxx.se/bug/?i=6131
- [36] = https://curl.haxx.se/bug/?i=6124
+ [1] = https://curl.se/bug/?i=6080
+ [2] = https://curl.se/bug/?i=6079
+ [3] = https://curl.se/bug/?i=6102
+ [4] = https://curl.se/bug/?i=6085
+ [5] = https://curl.se/bug/?i=6083
+ [6] = https://curl.se/bug/?i=6097
+ [7] = https://curl.se/bug/?i=6049
+ [8] = https://curl.se/bug/?i=6096
+ [9] = https://curl.se/mail/lib-2020-10/0037.html
+ [10] = https://curl.se/bug/?i=6093
+ [11] = https://curl.se/bug/?i=6092
+ [12] = https://curl.se/bug/?i=6095
+ [13] = https://curl.se/bug/?i=6088
+ [14] = https://curl.se/bug/?i=6086
+ [15] = https://curl.se/bug/?i=6061
+ [16] = https://curl.se/bug/?i=6053
+ [17] = https://curl.se/bug/?i=6125
+ [18] = https://curl.se/bug/?i=6068
+ [19] = https://curl.se/bug/?i=6069
+ [20] = https://curl.se/bug/?i=5868
+ [21] = https://curl.se/bug/?i=6118
+ [22] = https://curl.se/bug/?i=6119
+ [23] = https://curl.se/bug/?i=6117
+ [24] = https://curl.se/bug/?i=6116
+ [25] = https://curl.se/bug/?i=6108
+ [26] = https://curl.se/bug/?i=6108
+ [27] = https://curl.se/bug/?i=6105
+ [28] = https://curl.se/bug/?i=6145
+ [29] = https://curl.se/bug/?i=6141
+ [30] = https://curl.se/bug/?i=6072
+ [31] = https://curl.se/bug/?i=6113
+ [32] = https://curl.se/bug/?i=6134
+ [33] = https://curl.se/bug/?i=6126
+ [34] = https://curl.se/bug/?i=6131
+ [36] = https://curl.se/bug/?i=6124
+ [37] = https://curl.se/bug/?i=5896
+ [38] = https://curl.se/bug/?i=6074
+ [40] = https://curl.se/bug/?i=6154
+ [41] = https://curl.se/bug/?i=6153
+ [42] = https://curl.se/bug/?i=6156
+ [43] = https://curl.se/bug/?i=6155
+ [44] = https://curl.se/bug/?i=6147
+ [45] = https://curl.se/bug/?i=6148
+ [46] = https://curl.se/bug/?i=6138
+ [47] = https://curl.se/bug/?i=6139

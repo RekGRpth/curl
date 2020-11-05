@@ -9,7 +9,7 @@
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
- * are also available at https://curl.haxx.se/docs/copyright.html.
+ * are also available at https://curl.se/docs/copyright.html.
  *
  * You may opt to use, copy, modify, merge, publish, distribute and/or sell
  * copies of the Software, and permit persons to whom the Software is
@@ -96,6 +96,7 @@ bool curl_win32_idn_to_ascii(const char *in, char **out);
 #include "getinfo.h"
 #include "urlapi-int.h"
 #include "system_win32.h"
+#include "hsts.h"
 
 /* And now for the protocols */
 #include "ftp.h"
@@ -415,6 +416,8 @@ CURLcode Curl_close(struct Curl_easy **datap)
   Curl_flush_cookies(data, TRUE);
   Curl_altsvc_save(data, data->asi, data->set.str[STRING_ALTSVC]);
   Curl_altsvc_cleanup(&data->asi);
+  Curl_hsts_save(data, data->hsts, data->set.str[STRING_HSTS]);
+  Curl_hsts_cleanup(&data->hsts);
 #if !defined(CURL_DISABLE_HTTP) && !defined(CURL_DISABLE_CRYPTO_AUTH)
   Curl_http_auth_cleanup_digest(data);
 #endif
@@ -1915,6 +1918,19 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
   if(uc)
     return Curl_uc_to_curlcode(uc);
 
+  uc = curl_url_get(uh, CURLUPART_HOST, &data->state.up.hostname, 0);
+  if(uc) {
+    if(!strcasecompare("file", data->state.up.scheme))
+      return CURLE_OUT_OF_MEMORY;
+  }
+
+#ifdef USE_HSTS
+  if(data->hsts && strcasecompare("http", data->state.up.scheme)) {
+    if(Curl_hsts(data->hsts, data->state.up.hostname, TRUE))
+      infof(data, "Switch from HTTP to HTTPS due to HSTS!\n");
+  }
+#endif
+
   result = findprotocol(data, conn, data->state.up.scheme);
   if(result)
     return result;
@@ -1959,12 +1975,6 @@ static CURLcode parseurlandfillconn(struct Curl_easy *data,
   }
   else if(uc != CURLUE_NO_OPTIONS)
     return Curl_uc_to_curlcode(uc);
-
-  uc = curl_url_get(uh, CURLUPART_HOST, &data->state.up.hostname, 0);
-  if(uc) {
-    if(!strcasecompare("file", data->state.up.scheme))
-      return CURLE_OUT_OF_MEMORY;
-  }
 
   uc = curl_url_get(uh, CURLUPART_PATH, &data->state.up.path, 0);
   if(uc)
