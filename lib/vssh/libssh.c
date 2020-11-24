@@ -2640,7 +2640,7 @@ static ssize_t ssh_send(struct connectdata *conn, int sockindex,
 {
   int rc;
   struct Curl_easy *data = conn->data;
-  struct SSHPROTO *protop = data->req.protop;
+  struct SSHPROTO *protop = data->req.p.ssh;
   (void) sockindex; /* we only support SCP on the fixed known primary socket */
   (void) err;
 
