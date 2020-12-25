@@ -628,7 +628,7 @@ static CURLcode post_per_transfer(struct GlobalConfig *global,
     fputs("\n", per->progressbar.out);
 
   if(config->writeout)
-    ourWriteOut(per->curl, per, config->writeout);
+    ourWriteOut(per->curl, per, config->writeout, result);
 
   /* Close the outs file */
   if(outs->fopened && outs->stream) {
@@ -873,6 +873,7 @@ static CURLcode single_transfer(struct GlobalConfig *global,
         *added = TRUE;
         per->config = config;
         per->curl = curl;
+        per->urlnum = urlnode->num;
 
         /* default headers output stream is stdout */
         heads = &per->heads;
@@ -1661,6 +1662,8 @@ static CURLcode single_transfer(struct GlobalConfig *global,
           my_setopt_str(curl, CURLOPT_SSLKEYTYPE, config->key_type);
           my_setopt_str(curl, CURLOPT_PROXY_SSLKEYTYPE,
                         config->proxy_key_type);
+          my_setopt_str(curl, CURLOPT_AWS_SIGV4,
+                        config->aws_sigv4_provider);
 
           if(config->insecure_ok) {
             my_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -2539,7 +2542,7 @@ CURLcode operate(struct GlobalConfig *global, int argc, argv_item_t argv[])
 
   /* Parse .curlrc if necessary */
   if((argc == 1) ||
-     (!curl_strequal(first_arg, "-q") &&
+     (strncmp(first_arg, "-q", 2) &&
       !curl_strequal(first_arg, "--disable"))) {
     parseconfig(NULL, global); /* ignore possible failure */
 

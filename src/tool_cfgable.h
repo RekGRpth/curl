@@ -193,6 +193,7 @@ struct OperationConfig {
   long ssl_version_max;
   long proxy_ssl_version;
   long ip_version;
+  long create_file_mode; /* CURLOPT_NEW_FILE_PERMS */
   curl_TimeCond timecond;
   curl_off_t condtime;
   struct curl_slist *headers;
@@ -283,6 +284,7 @@ struct OperationConfig {
                                      0 is valid. default: CURL_HET_DEFAULT. */
   bool haproxy_protocol;          /* whether to send HAProxy protocol v1 */
   bool disallow_username_in_url;  /* disallow usernames in URLs */
+  char *aws_sigv4_provider;
   struct GlobalConfig *global;
   struct OperationConfig *prev;
   struct OperationConfig *next;   /* Always last in the struct */

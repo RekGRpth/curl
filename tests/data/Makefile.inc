@@ -139,6 +139,8 @@ test1160 test1161 test1162 test1163 test1164 test1165 test1166 test1167 \
 test1168          test1170 test1171 test1172 test1173 test1174 test1175 \
 test1176 test1177 test1178 test1179 \
 \
+test1188 \
+\
 test1190 test1191 test1192 test1193 test1194 test1195 test1196 test1197 \
 test1198 test1199 \
 test1200 test1201 test1202 test1203 test1204 test1205 test1206 test1207 \
@@ -205,7 +207,7 @@ test1800 test1801 \
 \
                                     test1904 test1905 test1906 test1907 \
 test1908 test1909 test1910 test1911 test1912 test1913 test1914 test1915 \
-test1916 test1917 \
+test1916 test1917 test1933 \
 \
 test2000 test2001 test2002 test2003 test2004 test2005 test2006 test2007 \
 test2008 test2009 test2010 test2011 test2012 test2013 test2014 test2015 \
