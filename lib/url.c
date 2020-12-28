@@ -1155,10 +1155,7 @@ ConnectionExists(struct Curl_easy *data,
       if(bundle->multiuse == BUNDLE_MULTIPLEX)
         multiplexed = CONN_INUSE(check);
 
-      if(canmultiplex) {
-        ;
-      }
-      else {
+      if(!canmultiplex) {
         if(multiplexed) {
           /* can only happen within multi handles, and means that another easy
              handle is using this connection */
@@ -1554,7 +1551,7 @@ CURLcode Curl_idnconvert_hostname(struct connectdata *conn,
         host->name = host->encalloc;
       }
       else {
-        failf(data, "Failed to convert %s to ACE; %s\n", host->name,
+        failf(data, "Failed to convert %s to ACE; %s", host->name,
               idn2_strerror(rc));
         return CURLE_URL_MALFORMAT;
       }
@@ -1569,7 +1566,7 @@ CURLcode Curl_idnconvert_hostname(struct connectdata *conn,
     }
     else {
       char buffer[STRERROR_LEN];
-      failf(data, "Failed to convert %s to ACE; %s\n", host->name,
+      failf(data, "Failed to convert %s to ACE; %s", host->name,
             Curl_winapi_strerror(GetLastError(), buffer, sizeof(buffer)));
       return CURLE_URL_MALFORMAT;
     }
