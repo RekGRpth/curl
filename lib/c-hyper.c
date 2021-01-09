@@ -57,8 +57,8 @@
 #include "curl_memory.h"
 #include "memdebug.h"
 
-static size_t read_cb(void *userp, hyper_context *ctx,
-                      uint8_t *buf, size_t buflen)
+size_t Curl_hyper_recv(void *userp, hyper_context *ctx,
+                       uint8_t *buf, size_t buflen)
 {
   struct connectdata *conn = (struct connectdata *)userp;
   struct Curl_easy *data = conn->data;
@@ -86,7 +86,7 @@ static size_t read_cb(void *userp, hyper_context *ctx,
   return (size_t)nread;
 }
 
-static size_t write_cb(void *userp, hyper_context *ctx,
+size_t Curl_hyper_send(void *userp, hyper_context *ctx,
                        const uint8_t *buf, size_t buflen)
 {
   struct connectdata *conn = (struct connectdata *)userp;
@@ -256,11 +256,11 @@ static CURLcode empty_header(struct Curl_easy *data)
     CURLE_WRITE_ERROR : CURLE_OK;
 }
 
-static CURLcode hyperstream(struct Curl_easy *data,
-                            struct connectdata *conn,
-                            int *didwhat,
-                            bool *done,
-                            int select_res)
+CURLcode Curl_hyper_stream(struct Curl_easy *data,
+                           struct connectdata *conn,
+                           int *didwhat,
+                           bool *done,
+                           int select_res)
 {
   hyper_response *resp = NULL;
   uint16_t http_status;
@@ -318,14 +318,18 @@ static CURLcode hyperstream(struct Curl_easy *data,
       else {
         uint8_t errbuf[256];
         size_t errlen = hyper_error_print(hypererr, errbuf, sizeof(errbuf));
-        failf(data, "Hyper: %.*s", (int)errlen, errbuf);
-        result = CURLE_RECV_ERROR; /* not a very good return code */
+        hyper_code code = hyper_error_code(hypererr);
+        failf(data, "Hyper: [%d] %.*s", (int)code, (int)errlen, errbuf);
+        if((code == HYPERE_UNEXPECTED_EOF) && !data->req.bytecount)
+          result = CURLE_GOT_NOTHING;
+        else
+          result = CURLE_RECV_ERROR;
       }
       *done = TRUE;
       hyper_error_free(hypererr);
       break;
     }
-    else if(h->init) {
+    else if(h->endtask == task) {
       /* end of transfer */
       *done = TRUE;
       infof(data, "hyperstream is done!\n");
@@ -337,7 +341,6 @@ static CURLcode hyperstream(struct Curl_easy *data,
     }
     /* HYPER_TASK_RESPONSE */
 
-    h->init = TRUE;
     *didwhat = KEEP_RECV;
     if(!resp) {
       failf(data, "hyperstream: couldn't get response");
@@ -399,6 +402,7 @@ static CURLcode hyperstream(struct Curl_easy *data,
       result = CURLE_OUT_OF_MEMORY;
       break;
     }
+    h->endtask = foreach;
 
     hyper_response_free(resp);
     resp = NULL;
@@ -692,8 +696,8 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
   }
   /* tell Hyper how to read/write network data */
   hyper_io_set_userdata(io, conn);
-  hyper_io_set_read(io, read_cb);
-  hyper_io_set_write(io, write_cb);
+  hyper_io_set_read(io, Curl_hyper_recv);
+  hyper_io_set_write(io, Curl_hyper_send);
 
   /* create an executor to poll futures */
   if(!h->exec) {
@@ -868,7 +872,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
     Curl_pgrsSetUploadSize(data, 0); /* nothing */
     Curl_setup_transfer(data, FIRSTSOCKET, -1, TRUE, -1);
   }
-  conn->datastream = hyperstream;
+  conn->datastream = Curl_hyper_stream;
 
   return CURLE_OK;
   error:
@@ -885,7 +889,8 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
   if(hypererr) {
     uint8_t errbuf[256];
     size_t errlen = hyper_error_print(hypererr, errbuf, sizeof(errbuf));
-    failf(data, "Hyper: %.*s", (int)errlen, errbuf);
+    hyper_code code = hyper_error_code(hypererr);
+    failf(data, "Hyper: [%d] %.*s", (int)code, (int)errlen, errbuf);
     hyper_error_free(hypererr);
   }
   return CURLE_OUT_OF_MEMORY;

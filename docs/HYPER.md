@@ -22,9 +22,9 @@ repository](https://github.com/hyperium/hyper/tree/hyper-capi).
 
 Build hyper and enable the C API:
 
-     % git clone -b hyper-capi https://github.com/hyperium/hyper
+     % git clone https://github.com/hyperium/hyper
      % cd hyper
-     % cargo build --no-default-features --features ffi
+     % RUSTFLAGS="--cfg hyper_unstable_ffi" cargo build --features client,http1,http2,ffi
 
 Build curl to use hyper's C API:
 
@@ -61,5 +61,4 @@ still need attention and verification include:
 - transfer encoding
 - alt-svc
 - hsts
-- CONNECT
 - DoH ([#6389](https://github.com/curl/curl/issues/6389))

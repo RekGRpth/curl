@@ -5,7 +5,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2021, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -256,7 +256,7 @@ wolfssl_connect_step1(struct connectdata *conn,
     use_sni(TRUE);
     break;
   case CURL_SSLVERSION_TLSv1_0:
-#ifdef WOLFSSL_ALLOW_TLSV10
+#if defined(WOLFSSL_ALLOW_TLSV10) && !defined(NO_OLD_TLS)
     req_method = TLSv1_client_method();
     use_sni(TRUE);
 #else
@@ -265,8 +265,13 @@ wolfssl_connect_step1(struct connectdata *conn,
 #endif
     break;
   case CURL_SSLVERSION_TLSv1_1:
+#ifndef NO_OLD_TLS
     req_method = TLSv1_1_client_method();
     use_sni(TRUE);
+#else
+    failf(data, "wolfSSL does not support TLS 1.1");
+    return CURLE_NOT_BUILT_IN;
+#endif
     break;
   case CURL_SSLVERSION_TLSv1_2:
     req_method = TLSv1_2_client_method();
@@ -499,6 +504,13 @@ wolfssl_connect_step1(struct connectdata *conn,
 #endif
   }
 #endif /* OPENSSL_EXTRA */
+
+#ifdef HAVE_SECURE_RENEGOTIATION
+  if(wolfSSL_UseSecureRenegotiation(backend->handle) != SSL_SUCCESS) {
+    failf(data, "SSL: failed setting secure renegotiation");
+    return CURLE_SSL_CONNECT_ERROR;
+  }
+#endif /* HAVE_SECURE_RENEGOTIATION */
 
   /* Check if there's a cached ID we can/should use here! */
   if(SSL_SET_OPTION(primary.sessionid)) {
