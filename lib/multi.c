@@ -1589,9 +1589,12 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
       process_pending_handles(multi); /* multiplexed */
     }
 
-    if(data->conn && data->mstate > CURLM_STATE_CONNECT &&
+    if(data->mstate > CURLM_STATE_CONNECT &&
        data->mstate < CURLM_STATE_COMPLETED) {
       /* Make sure we set the connection's current owner */
+      DEBUGASSERT(data->conn);
+      if(!data->conn)
+        return CURLM_INTERNAL_ERROR;
       data->conn->data = data;
     }
 
@@ -1916,7 +1919,10 @@ static CURLMcode multi_runsingle(struct Curl_multi *multi,
               if(wc->state == CURLWC_DONE || wc->state == CURLWC_SKIP) {
                 /* skip some states if it is important */
                 multi_done(data, CURLE_OK, FALSE);
-                multistate(data, CURLM_STATE_DONE);
+
+                /* if there's no connection left, skip the DONE state */
+                multistate(data, data->conn ?
+                           CURLM_STATE_DONE : CURLM_STATE_COMPLETED);
                 rc = CURLM_CALL_MULTI_PERFORM;
                 break;
               }
