@@ -7,7 +7,7 @@
  *                            | (__| |_| |  _ <| |___
  *                             \___|\___/|_| \_\_____|
  *
- * Copyright (C) 2015 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 2015 - 2021, Daniel Stenberg, <daniel@haxx.se>, et al.
  * Copyright (C) 2012 - 2014, Linus Nielsen Feltzing, <linus@haxx.se>
  *
  * This software is licensed as described in the file COPYING, which
@@ -85,7 +85,8 @@ int Curl_conncache_init(struct conncache *, int size);
 void Curl_conncache_destroy(struct conncache *connc);
 
 /* return the correct bundle, to a host or a proxy */
-struct connectbundle *Curl_conncache_find_bundle(struct connectdata *conn,
+struct connectbundle *Curl_conncache_find_bundle(struct Curl_easy *data,
+                                                 struct connectdata *conn,
                                                  struct conncache *connc,
                                                  const char **hostp);
 /* returns number of connections currently held in the connection cache */
@@ -93,15 +94,15 @@ size_t Curl_conncache_size(struct Curl_easy *data);
 
 bool Curl_conncache_return_conn(struct Curl_easy *data,
                                 struct connectdata *conn);
-CURLcode Curl_conncache_add_conn(struct conncache *connc,
-                                 struct connectdata *conn) WARN_UNUSED_RESULT;
+CURLcode Curl_conncache_add_conn(struct Curl_easy *data) WARN_UNUSED_RESULT;
 void Curl_conncache_remove_conn(struct Curl_easy *data,
                                 struct connectdata *conn,
                                 bool lock);
 bool Curl_conncache_foreach(struct Curl_easy *data,
                             struct conncache *connc,
                             void *param,
-                            int (*func)(struct connectdata *conn,
+                            int (*func)(struct Curl_easy *data,
+                                        struct connectdata *conn,
                                         void *param));
 
 struct connectdata *

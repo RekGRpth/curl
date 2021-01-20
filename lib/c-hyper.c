@@ -67,7 +67,7 @@ size_t Curl_hyper_recv(void *userp, hyper_context *ctx,
 
   (void)ctx;
 
-  result = Curl_read(conn, conn->sockfd, (char *)buf, buflen, &nread);
+  result = Curl_read(data, conn->sockfd, (char *)buf, buflen, &nread);
   if(result == CURLE_AGAIN) {
     /* would block, register interest */
     if(data->hyp.read_waker)
@@ -94,7 +94,7 @@ size_t Curl_hyper_send(void *userp, hyper_context *ctx,
   CURLcode result;
   ssize_t nwrote;
 
-  result = Curl_write(conn, conn->sockfd, (void *)buf, buflen, &nwrote);
+  result = Curl_write(data, conn->sockfd, (void *)buf, buflen, &nwrote);
   if(result == CURLE_AGAIN) {
     /* would block, register interest */
     if(data->hyp.write_waker)
@@ -120,12 +120,9 @@ static int hyper_each_header(void *userdata,
                              size_t value_len)
 {
   struct Curl_easy *data = (struct Curl_easy *)userdata;
-  size_t wrote;
   size_t len;
   char *headp;
   CURLcode result;
-  curl_write_callback writeheader =
-    data->set.fwrite_header? data->set.fwrite_header: data->set.fwrite_func;
   Curl_dyn_reset(&data->state.headerb);
   if(name_len) {
     if(Curl_dyn_addf(&data->state.headerb, "%.*s: %.*s\r\n",
@@ -147,10 +144,8 @@ static int hyper_each_header(void *userdata,
 
   Curl_debug(data, CURLINFO_HEADER_IN, headp, len);
 
-  Curl_set_in_callback(data, true);
-  wrote = writeheader(headp, 1, len, data->set.writeheader);
-  Curl_set_in_callback(data, false);
-  if(wrote != len) {
+  result = Curl_client_write(data, CLIENTWRITE_HEADER, headp, len);
+  if(result) {
     data->state.hresult = CURLE_ABORTED_BY_CALLBACK;
     return HYPER_ITER_BREAK;
   }
@@ -165,13 +160,12 @@ static int hyper_body_chunk(void *userdata, const hyper_buf *chunk)
   char *buf = (char *)hyper_buf_bytes(chunk);
   size_t len = hyper_buf_len(chunk);
   struct Curl_easy *data = (struct Curl_easy *)userdata;
-  curl_write_callback writebody = data->set.fwrite_func;
   struct SingleRequest *k = &data->req;
-  size_t wrote;
+  CURLcode result;
 
   if(0 == k->bodywrites++) {
     bool done = FALSE;
-    CURLcode result = Curl_http_firstwrite(data, data->conn, &done);
+    result = Curl_http_firstwrite(data, data->conn, &done);
     if(result || done) {
       infof(data, "Return early from hyper_body_chunk\n");
       data->state.hresult = result;
@@ -181,12 +175,10 @@ static int hyper_body_chunk(void *userdata, const hyper_buf *chunk)
   if(k->ignorebody)
     return HYPER_ITER_CONTINUE;
   Curl_debug(data, CURLINFO_DATA_IN, buf, len);
-  Curl_set_in_callback(data, true);
-  wrote = writebody(buf, 1, len, data->set.out);
-  Curl_set_in_callback(data, false);
+  result = Curl_client_write(data, CLIENTWRITE_BODY, buf, len);
 
-  if(wrote != len) {
-    data->state.hresult = CURLE_WRITE_ERROR;
+  if(result) {
+    data->state.hresult = result;
     return HYPER_ITER_BREAK;
   }
 
@@ -380,7 +372,7 @@ CURLcode Curl_hyper_stream(struct Curl_easy *data,
     /* Curl_http_auth_act() checks what authentication methods that are
      * available and decides which one (if any) to use. It will set 'newurl'
      * if an auth method was picked. */
-    result = Curl_http_auth_act(conn);
+    result = Curl_http_auth_act(data);
     if(result)
       break;
 
@@ -549,8 +541,7 @@ static int uploadstreamed(void *userdata, hyper_context *ctx,
   size_t fillcount;
   struct Curl_easy *data = (struct Curl_easy *)userdata;
   CURLcode result =
-    Curl_fillreadbuffer(data->conn, data->set.upload_buffer_size,
-                        &fillcount);
+    Curl_fillreadbuffer(data, data->set.upload_buffer_size, &fillcount);
   (void)ctx;
   if(result)
     return HYPER_POLL_ERROR;
@@ -628,9 +619,9 @@ static CURLcode cookies(struct Curl_easy *data,
  * request is to be performed. This creates and sends a properly constructed
  * HTTP request.
  */
-CURLcode Curl_http(struct connectdata *conn, bool *done)
+CURLcode Curl_http(struct Curl_easy *data, bool *done)
 {
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct hyptransfer *h = &data->hyp;
   hyper_io *io = NULL;
   hyper_clientconn_options *options = NULL;
@@ -670,7 +661,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
       if(!pq)
         return CURLE_OUT_OF_MEMORY;
     }
-    result = Curl_http_output_auth(conn, method, httpreq,
+    result = Curl_http_output_auth(data, conn, method, httpreq,
                                    (pq ? pq : data->state.up.path), FALSE);
     free(pq);
     if(result)
@@ -681,11 +672,11 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
   if(result)
     return result;
 
-  result = Curl_http_range(data, conn, httpreq);
+  result = Curl_http_range(data, httpreq);
   if(result)
     return result;
 
-  result = Curl_http_useragent(data, conn);
+  result = Curl_http_useragent(data);
   if(result)
     return result;
 
@@ -799,7 +790,7 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
      Curl_hyper_header(data, headers, data->state.aptr.uagent))
     goto error;
 
-  p_accept = Curl_checkheaders(conn, "Accept")?NULL:"Accept: */*\r\n";
+  p_accept = Curl_checkheaders(data, "Accept")?NULL:"Accept: */*\r\n";
   if(p_accept && Curl_hyper_header(data, headers, p_accept))
     goto error;
 
@@ -808,14 +799,15 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
 
 #ifndef CURL_DISABLE_PROXY
   if(conn->bits.httpproxy && !conn->bits.tunnel_proxy &&
-     !Curl_checkProxyheaders(conn, "Proxy-Connection")) {
+     !Curl_checkheaders(data, "Proxy-Connection") &&
+     !Curl_checkProxyheaders(data, conn, "Proxy-Connection")) {
     if(Curl_hyper_header(data, headers, "Proxy-Connection: Keep-Alive"))
       goto error;
   }
 #endif
 
   Curl_safefree(data->state.aptr.ref);
-  if(data->change.referer && !Curl_checkheaders(conn, "Referer")) {
+  if(data->change.referer && !Curl_checkheaders(data, "Referer")) {
     data->state.aptr.ref = aprintf("Referer: %s\r\n", data->change.referer);
     if(!data->state.aptr.ref)
       return CURLE_OUT_OF_MEMORY;
@@ -827,11 +819,11 @@ CURLcode Curl_http(struct connectdata *conn, bool *done)
   if(result)
     return result;
 
-  result = Curl_add_timecondition(conn, headers);
+  result = Curl_add_timecondition(data, headers);
   if(result)
     return result;
 
-  result = Curl_add_custom_headers(conn, FALSE, headers);
+  result = Curl_add_custom_headers(data, FALSE, headers);
   if(result)
     return result;
 

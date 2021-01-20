@@ -5,7 +5,7 @@
  *                | (__| |_| |  _ <| |___
  *                 \___|\___/|_| \_\_____|
  *
- * Copyright (C) 1998 - 2020, Daniel Stenberg, <daniel@haxx.se>, et al.
+ * Copyright (C) 1998 - 2021, Daniel Stenberg, <daniel@haxx.se>, et al.
  *
  * This software is licensed as described in the file COPYING, which
  * you should have received as part of this distribution. The terms
@@ -126,7 +126,7 @@ static void _ldap_free_urldesc(LDAPURLDesc *ludp);
 #endif
 
 
-static CURLcode Curl_ldap(struct connectdata *conn, bool *done);
+static CURLcode ldap_do(struct Curl_easy *data, bool *done);
 
 /*
  * LDAP protocol handler.
@@ -135,7 +135,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done);
 const struct Curl_handler Curl_handler_ldap = {
   "LDAP",                               /* scheme */
   ZERO_NULL,                            /* setup_connection */
-  Curl_ldap,                            /* do_it */
+  ldap_do,                              /* do_it */
   ZERO_NULL,                            /* done */
   ZERO_NULL,                            /* do_more */
   ZERO_NULL,                            /* connect_it */
@@ -162,7 +162,7 @@ const struct Curl_handler Curl_handler_ldap = {
 const struct Curl_handler Curl_handler_ldaps = {
   "LDAPS",                              /* scheme */
   ZERO_NULL,                            /* setup_connection */
-  Curl_ldap,                            /* do_it */
+  ldap_do,                              /* do_it */
   ZERO_NULL,                            /* done */
   ZERO_NULL,                            /* do_more */
   ZERO_NULL,                            /* connect_it */
@@ -266,7 +266,7 @@ static int ldap_win_bind(struct connectdata *conn, LDAP *server,
 #endif
 
 
-static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
+static CURLcode ldap_do(struct Curl_easy *data, bool *done)
 {
   CURLcode result = CURLE_OK;
   int rc = 0;
@@ -275,7 +275,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
   LDAPMessage *ldapmsg = NULL;
   LDAPMessage *entryIterator;
   int num = 0;
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   int ldap_proto = LDAP_VERSION3;
   int ldap_ssl = 0;
   char *val_b64 = NULL;
@@ -536,14 +536,14 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
 #endif
       name_len = strlen(name);
 
-      result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *)"DN: ", 4);
+      result = Curl_client_write(data, CLIENTWRITE_BODY, (char *)"DN: ", 4);
       if(result) {
         FREE_ON_WINLDAP(name);
         ldap_memfree(dn);
         goto quit;
       }
 
-      result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *) name,
+      result = Curl_client_write(data, CLIENTWRITE_BODY, (char *) name,
                                  name_len);
       if(result) {
         FREE_ON_WINLDAP(name);
@@ -551,7 +551,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
         goto quit;
       }
 
-      result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *)"\n", 1);
+      result = Curl_client_write(data, CLIENTWRITE_BODY, (char *)"\n", 1);
       if(result) {
         FREE_ON_WINLDAP(name);
         ldap_memfree(dn);
@@ -589,7 +589,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
       vals = ldap_get_values_len(server, entryIterator, attribute);
       if(vals != NULL) {
         for(i = 0; (vals[i] != NULL); i++) {
-          result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *)"\t", 1);
+          result = Curl_client_write(data, CLIENTWRITE_BODY, (char *)"\t", 1);
           if(result) {
             ldap_value_free_len(vals);
             FREE_ON_WINLDAP(attr);
@@ -600,7 +600,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
             goto quit;
           }
 
-          result = Curl_client_write(conn, CLIENTWRITE_BODY,
+          result = Curl_client_write(data, CLIENTWRITE_BODY,
                                      (char *) attr, attr_len);
           if(result) {
             ldap_value_free_len(vals);
@@ -612,7 +612,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
             goto quit;
           }
 
-          result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *)": ", 2);
+          result = Curl_client_write(data, CLIENTWRITE_BODY, (char *)": ", 2);
           if(result) {
             ldap_value_free_len(vals);
             FREE_ON_WINLDAP(attr);
@@ -644,7 +644,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
             }
 
             if(val_b64_sz > 0) {
-              result = Curl_client_write(conn, CLIENTWRITE_BODY, val_b64,
+              result = Curl_client_write(data, CLIENTWRITE_BODY, val_b64,
                                          val_b64_sz);
               free(val_b64);
               if(result) {
@@ -661,7 +661,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
             }
           }
           else {
-            result = Curl_client_write(conn, CLIENTWRITE_BODY, vals[i]->bv_val,
+            result = Curl_client_write(data, CLIENTWRITE_BODY, vals[i]->bv_val,
                                        vals[i]->bv_len);
             if(result) {
               ldap_value_free_len(vals);
@@ -676,7 +676,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
             dlsize += vals[i]->bv_len;
           }
 
-          result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *)"\n", 1);
+          result = Curl_client_write(data, CLIENTWRITE_BODY, (char *)"\n", 1);
           if(result) {
             ldap_value_free_len(vals);
             FREE_ON_WINLDAP(attr);
@@ -698,7 +698,7 @@ static CURLcode Curl_ldap(struct connectdata *conn, bool *done)
       FREE_ON_WINLDAP(attr);
       ldap_memfree(attribute);
 
-      result = Curl_client_write(conn, CLIENTWRITE_BODY, (char *)"\n", 1);
+      result = Curl_client_write(data, CLIENTWRITE_BODY, (char *)"\n", 1);
       if(result)
         goto quit;
       dlsize++;

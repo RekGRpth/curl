@@ -44,7 +44,8 @@ noinst_PROGRAMS = chkhostname libauthretry libntlmconnect                \
  lib547 lib548 lib549 lib552 lib553 lib554 lib555 lib556 lib557 lib558   \
  lib559 lib560 lib562 lib564 lib565 lib566 lib567 lib568 lib569 lib570   \
  lib571 lib572 lib573 lib574 lib575 lib576        lib578 lib579 lib582   \
- lib583 lib585 lib586 lib587 lib589 lib590 lib591 lib597 lib598 lib599   \
+ lib583 lib584 lib585 lib586 lib587 lib589 lib590 lib591 lib597 lib598   \
+ lib599 \
  lib643 lib644 lib645 lib650 lib651 lib652 lib653 lib654 lib655 lib658   \
  lib659 lib661 lib666 lib667 lib668 \
  lib670 lib671 lib672 lib673 lib674 \
@@ -59,7 +60,7 @@ noinst_PROGRAMS = chkhostname libauthretry libntlmconnect                \
  lib1558 lib1559 lib1560 lib1564 lib1565 lib1567 lib1568 \
  lib1591 lib1592 lib1593 lib1594 lib1596 \
          lib1905 lib1906 lib1907 lib1908 lib1910 lib1911 lib1912 lib1913 \
-         lib1915 lib1916 lib1917 lib1933 \
+         lib1915 lib1916 lib1917 lib1918 lib1933 \
          lib3010
 
 chkdecimalpoint_SOURCES = chkdecimalpoint.c ../../lib/mprintf.c \
@@ -301,6 +302,9 @@ lib582_CPPFLAGS = $(AM_CPPFLAGS)
 
 lib583_SOURCES = lib583.c $(SUPPORTFILES)
 lib583_CPPFLAGS = $(AM_CPPFLAGS)
+
+lib584_SOURCES = lib589.c $(SUPPORTFILES)
+lib584_CPPFLAGS = $(AM_CPPFLAGS) -DLIB584
 
 lib585_SOURCES = lib500.c $(SUPPORTFILES) $(TESTUTIL) $(TSTTRACE) $(MULTIBYTE)
 lib585_LDADD = $(TESTUTIL_LIBS)
@@ -663,6 +667,9 @@ lib1916_CPPFLAGS = $(AM_CPPFLAGS)
 
 lib1917_SOURCES = lib1916.c $(SUPPORTFILES) $(WARNLESS)
 lib1917_CPPFLAGS = $(AM_CPPFLAGS) -DLIB1917
+
+lib1918_SOURCES = lib1918.c $(SUPPORTFILES) $(WARNLESS)
+lib1918_CPPFLAGS = $(AM_CPPFLAGS)
 
 lib1933_SOURCES = lib1933.c $(SUPPORTFILES) $(TESTUTIL) $(WARNLESS)
 lib1933_LDADD = $(TESTUTIL_LIBS)

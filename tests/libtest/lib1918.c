@@ -21,52 +21,35 @@
  ***************************************************************************/
 #include "test.h"
 
+#include "testutil.h"
+#include "warnless.h"
 #include "memdebug.h"
 
 int test(char *URL)
 {
-  CURL *curl;
-  CURLcode res = CURLE_OK;
+  const struct curl_easyoption *o;
+  int error = 0;
+  (void)URL;
 
-  if(curl_global_init(CURL_GLOBAL_ALL) != CURLE_OK) {
-    fprintf(stderr, "curl_global_init() failed\n");
-    return TEST_ERR_MAJOR_BAD;
+  curl_global_init(CURL_GLOBAL_ALL);
+
+  for(o = curl_easy_option_next(NULL);
+      o;
+      o = curl_easy_option_next(o)) {
+    const struct curl_easyoption *ename =
+      curl_easy_option_by_name(o->name);
+    const struct curl_easyoption *eid =
+      curl_easy_option_by_id(o->id);
+
+    if(ename->id != o->id) {
+      printf("name lookup id %d doesn't match %d\n",
+             ename->id, o->id);
+    }
+    else if(eid->id != o->id) {
+      printf("ID lookup %d doesn't match %d\n",
+             ename->id, o->id);
+    }
   }
-
-  curl = curl_easy_init();
-  if(!curl) {
-    fprintf(stderr, "curl_easy_init() failed\n");
-    curl_global_cleanup();
-    return TEST_ERR_MAJOR_BAD;
-  }
-
-  /* First set the URL that is about to receive our POST. */
-  test_setopt(curl, CURLOPT_URL, URL);
-  test_setopt(curl, CURLOPT_VERBOSE, 1L); /* show verbose for debug */
-  test_setopt(curl, CURLOPT_HEADER, 1L); /* include header */
-
-#ifdef LIB584
-  {
-    curl_mime *mime = curl_mime_init(curl);
-    curl_mimepart *part = curl_mime_addpart(mime);
-    curl_mime_name(part, "fake");
-    curl_mime_data(part, "party", 5);
-    test_setopt(curl, CURLOPT_MIMEPOST, mime);
-    res = curl_easy_perform(curl);
-    curl_mime_free(mime);
-  }
-#endif
-
-  test_setopt(curl, CURLOPT_MIMEPOST, NULL);
-
-  /* Now, we should be making a zero byte POST request */
-  res = curl_easy_perform(curl);
-
-test_cleanup:
-
-  /* always cleanup */
-  curl_easy_cleanup(curl);
   curl_global_cleanup();
-
-  return (int)res;
+  return error;
 }

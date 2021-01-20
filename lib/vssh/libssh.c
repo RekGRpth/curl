@@ -107,40 +107,44 @@
 #endif
 
 /* Local functions: */
-static CURLcode myssh_connect(struct connectdata *conn, bool *done);
-static CURLcode myssh_multi_statemach(struct connectdata *conn,
+static CURLcode myssh_connect(struct Curl_easy *data, bool *done);
+static CURLcode myssh_multi_statemach(struct Curl_easy *data,
                                       bool *done);
-static CURLcode myssh_do_it(struct connectdata *conn, bool *done);
+static CURLcode myssh_do_it(struct Curl_easy *data, bool *done);
 
-static CURLcode scp_done(struct connectdata *conn,
+static CURLcode scp_done(struct Curl_easy *data,
                          CURLcode, bool premature);
-static CURLcode scp_doing(struct connectdata *conn, bool *dophase_done);
-static CURLcode scp_disconnect(struct connectdata *conn,
+static CURLcode scp_doing(struct Curl_easy *data, bool *dophase_done);
+static CURLcode scp_disconnect(struct Curl_easy *data,
+                               struct connectdata *conn,
                                bool dead_connection);
 
-static CURLcode ssh_done(struct connectdata *conn,
+static CURLcode ssh_done(struct Curl_easy *data,
                          CURLcode, bool premature);
-static CURLcode ssh_doing(struct connectdata *conn, bool *dophase_done);
-static CURLcode ssh_disconnect1(struct connectdata *conn,
+static CURLcode ssh_doing(struct Curl_easy *data, bool *dophase_done);
+static CURLcode ssh_disconnect1(struct Curl_easy *data,
+                               struct connectdata *conn,
                                bool dead_connection);
 
-static CURLcode sftp_done(struct connectdata *conn,
+static CURLcode sftp_done(struct Curl_easy *data,
                           CURLcode, bool premature);
-static CURLcode sftp_doing(struct connectdata *conn,
+static CURLcode sftp_doing(struct Curl_easy *data,
                            bool *dophase_done);
-static CURLcode sftp_disconnect(struct connectdata *conn, bool dead);
+static CURLcode sftp_disconnect(struct Curl_easy *data,
+                                struct connectdata *conn,
+                                bool dead);
 static
-CURLcode sftp_perform(struct connectdata *conn,
+CURLcode sftp_perform(struct Curl_easy *data,
                       bool *connected,
                       bool *dophase_done);
 
-static void sftp_quote(struct connectdata *conn);
-static void sftp_quote_stat(struct connectdata *conn);
-static int myssh_getsock(struct connectdata *conn, curl_socket_t *sock);
-static int myssh_perform_getsock(const struct connectdata *conn,
-                                 curl_socket_t *sock);
+static void sftp_quote(struct Curl_easy *data);
+static void sftp_quote_stat(struct Curl_easy *data);
+static int myssh_getsock(struct Curl_easy *data,
+                         struct connectdata *conn, curl_socket_t *sock);
 
-static CURLcode myssh_setup_connection(struct connectdata *conn);
+static CURLcode myssh_setup_connection(struct Curl_easy *data,
+                                       struct connectdata *conn);
 
 /*
  * SCP protocol handler.
@@ -158,7 +162,7 @@ const struct Curl_handler Curl_handler_scp = {
   myssh_getsock,                /* proto_getsock */
   myssh_getsock,                /* doing_getsock */
   ZERO_NULL,                    /* domore_getsock */
-  myssh_perform_getsock,        /* perform_getsock */
+  myssh_getsock,                /* perform_getsock */
   scp_disconnect,               /* disconnect */
   ZERO_NULL,                    /* readwrite */
   ZERO_NULL,                    /* connection_check */
@@ -169,7 +173,7 @@ const struct Curl_handler Curl_handler_scp = {
 };
 
 /*
- * SCP protocol handler.
+ * SSH protocol handler.
  */
 
 const struct Curl_handler Curl_handler_ssh = {
@@ -184,8 +188,8 @@ const struct Curl_handler Curl_handler_ssh = {
   myssh_getsock,                /* proto_getsock */
   myssh_getsock,                /* doing_getsock */
   ZERO_NULL,                    /* domore_getsock */
-  myssh_perform_getsock,        /* perform_getsock */
-  ssh_disconnect1,               /* disconnect */
+  myssh_getsock,                /* perform_getsock */
+  ssh_disconnect1,              /* disconnect */
   ZERO_NULL,                    /* readwrite */
   ZERO_NULL,                    /* connection_check */
   PORT_SSH,                     /* defport */
@@ -210,7 +214,7 @@ const struct Curl_handler Curl_handler_sftp = {
   myssh_getsock,                        /* proto_getsock */
   myssh_getsock,                        /* doing_getsock */
   ZERO_NULL,                            /* domore_getsock */
-  myssh_perform_getsock,                /* perform_getsock */
+  myssh_getsock,                        /* perform_getsock */
   sftp_disconnect,                      /* disconnect */
   ZERO_NULL,                            /* readwrite */
   ZERO_NULL,                            /* connection_check */
@@ -255,12 +259,13 @@ static CURLcode sftp_error_to_CURLE(int err)
  * SSH State machine related code
  */
 /* This is the ONLY way to change SSH state! */
-static void mystate(struct connectdata *conn, sshstate nowstate
+static void mystate(struct Curl_easy *data, sshstate nowstate
 #ifdef DEBUGBUILD
                     , int lineno
 #endif
   )
 {
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
 #if defined(DEBUGBUILD) && !defined(CURL_DISABLE_VERBOSE_STRINGS)
   /* for debug purposes */
@@ -336,7 +341,7 @@ static void mystate(struct connectdata *conn, sshstate nowstate
 
 
   if(sshc->state != nowstate) {
-    infof(conn->data, "SSH %p state change from %s to %s (line %d)\n",
+    infof(data, "SSH %p state change from %s to %s (line %d)\n",
           (void *) sshc, names[sshc->state], names[nowstate],
           lineno);
   }
@@ -355,10 +360,10 @@ static void mystate(struct connectdata *conn, sshstate nowstate
  *
  * Returns SSH_OK or SSH_ERROR.
  */
-static int myssh_is_known(struct connectdata *conn)
+static int myssh_is_known(struct Curl_easy *data)
 {
   int rc;
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
   ssh_key pubkey;
   size_t hlen;
@@ -568,10 +573,10 @@ static int myssh_is_known(struct connectdata *conn)
 
 cleanup:
   if(found_base64) {
-    free(found_base64);
+    (free)(found_base64);
   }
   if(known_base64) {
-    free(known_base64);
+    (free)(known_base64);
   }
   if(hash)
     ssh_clean_pubkey_hash(&hash);
@@ -585,14 +590,14 @@ cleanup:
 }
 
 #define MOVE_TO_ERROR_STATE(_r) { \
-  state(conn, SSH_SESSION_DISCONNECT); \
+  state(data, SSH_SESSION_DISCONNECT); \
   sshc->actualcode = _r; \
   rc = SSH_ERROR; \
   break; \
 }
 
 #define MOVE_TO_SFTP_CLOSE_STATE() { \
-  state(conn, SSH_SFTP_CLOSE); \
+  state(data, SSH_SFTP_CLOSE); \
   sshc->actualcode = sftp_error_to_CURLE(sftp_get_error(sshc->sftp_session)); \
   rc = SSH_ERROR; \
   break; \
@@ -601,7 +606,7 @@ cleanup:
 #define MOVE_TO_LAST_AUTH \
   if(sshc->auth_methods & SSH_AUTH_METHOD_PASSWORD) { \
     rc = SSH_OK; \
-    state(conn, SSH_AUTH_PASS_INIT); \
+    state(data, SSH_AUTH_PASS_INIT); \
     break; \
   } \
   else { \
@@ -611,7 +616,7 @@ cleanup:
 #define MOVE_TO_TERTIARY_AUTH \
   if(sshc->auth_methods & SSH_AUTH_METHOD_INTERACTIVE) { \
     rc = SSH_OK; \
-    state(conn, SSH_AUTH_KEY_INIT); \
+    state(data, SSH_AUTH_KEY_INIT); \
     break; \
   } \
   else { \
@@ -621,7 +626,7 @@ cleanup:
 #define MOVE_TO_SECONDARY_AUTH \
   if(sshc->auth_methods & SSH_AUTH_METHOD_GSSAPI_MIC) { \
     rc = SSH_OK; \
-    state(conn, SSH_AUTH_GSSAPI); \
+    state(data, SSH_AUTH_GSSAPI); \
     break; \
   } \
   else { \
@@ -699,10 +704,10 @@ restart:
  * to will be set to TRUE if the libssh function returns SSH_AGAIN
  * meaning it wants to be called again when the socket is ready
  */
-static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
+static CURLcode myssh_statemach_act(struct Curl_easy *data, bool *block)
 {
   CURLcode result = CURLE_OK;
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct SSHPROTO *protop = data->req.p.ssh;
   struct ssh_conn *sshc = &conn->proto.sshc;
   curl_socket_t sock = conn->sock[FIRSTSOCKET];
@@ -728,7 +733,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
          non-blocking */
       ssh_set_blocking(sshc->ssh_session, 0);
 
-      state(conn, SSH_S_STARTUP);
+      state(data, SSH_S_STARTUP);
       /* FALLTHROUGH */
 
     case SSH_S_STARTUP:
@@ -741,17 +746,17 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         MOVE_TO_ERROR_STATE(CURLE_FAILED_INIT);
       }
 
-      state(conn, SSH_HOSTKEY);
+      state(data, SSH_HOSTKEY);
 
       /* FALLTHROUGH */
     case SSH_HOSTKEY:
 
-      rc = myssh_is_known(conn);
+      rc = myssh_is_known(data);
       if(rc != SSH_OK) {
         MOVE_TO_ERROR_STATE(CURLE_PEER_FAILED_VERIFICATION);
       }
 
-      state(conn, SSH_AUTHLIST);
+      state(data, SSH_AUTHLIST);
       /* FALLTHROUGH */
     case SSH_AUTHLIST:{
         sshc->authed = FALSE;
@@ -765,7 +770,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         if(rc == SSH_AUTH_SUCCESS) {
           sshc->authed = TRUE;
           infof(data, "Authenticated with none\n");
-          state(conn, SSH_AUTH_DONE);
+          state(data, SSH_AUTH_DONE);
           break;
         }
         else if(rc == SSH_AUTH_ERROR) {
@@ -774,17 +779,17 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
         sshc->auth_methods = ssh_userauth_list(sshc->ssh_session, NULL);
         if(sshc->auth_methods & SSH_AUTH_METHOD_PUBLICKEY) {
-          state(conn, SSH_AUTH_PKEY_INIT);
+          state(data, SSH_AUTH_PKEY_INIT);
           infof(data, "Authentication using SSH public key file\n");
         }
         else if(sshc->auth_methods & SSH_AUTH_METHOD_GSSAPI_MIC) {
-          state(conn, SSH_AUTH_GSSAPI);
+          state(data, SSH_AUTH_GSSAPI);
         }
         else if(sshc->auth_methods & SSH_AUTH_METHOD_INTERACTIVE) {
-          state(conn, SSH_AUTH_KEY_INIT);
+          state(data, SSH_AUTH_KEY_INIT);
         }
         else if(sshc->auth_methods & SSH_AUTH_METHOD_PASSWORD) {
-          state(conn, SSH_AUTH_PASS_INIT);
+          state(data, SSH_AUTH_PASS_INIT);
         }
         else {                  /* unsupported authentication method */
           MOVE_TO_ERROR_STATE(CURLE_LOGIN_DENIED);
@@ -824,7 +829,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
           break;
         }
 
-        state(conn, SSH_AUTH_PKEY);
+        state(data, SSH_AUTH_PKEY);
         break;
 
       }
@@ -839,7 +844,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
           rc = SSH_OK;
           sshc->authed = TRUE;
           infof(data, "Completed public key authentication\n");
-          state(conn, SSH_AUTH_DONE);
+          state(data, SSH_AUTH_DONE);
           break;
         }
 
@@ -856,7 +861,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       if(rc == SSH_AUTH_SUCCESS) {
         sshc->authed = TRUE;
         infof(data, "Completed public key authentication\n");
-        state(conn, SSH_AUTH_DONE);
+        state(data, SSH_AUTH_DONE);
         break;
       }
       else {
@@ -880,7 +885,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         rc = SSH_OK;
         sshc->authed = TRUE;
         infof(data, "Completed gssapi authentication\n");
-        state(conn, SSH_AUTH_DONE);
+        state(data, SSH_AUTH_DONE);
         break;
       }
 
@@ -889,7 +894,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
     case SSH_AUTH_KEY_INIT:
       if(data->set.ssh_auth_types & CURLSSH_AUTH_KEYBOARD) {
-        state(conn, SSH_AUTH_KEY);
+        state(data, SSH_AUTH_KEY);
       }
       else {
         MOVE_TO_LAST_AUTH;
@@ -907,7 +912,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         sshc->authed = TRUE;
         infof(data, "completed keyboard interactive authentication\n");
       }
-      state(conn, SSH_AUTH_DONE);
+      state(data, SSH_AUTH_DONE);
       break;
 
     case SSH_AUTH_PASS_INIT:
@@ -915,7 +920,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         /* Host key authentication is intentionally not implemented */
         MOVE_TO_ERROR_STATE(CURLE_LOGIN_DENIED);
       }
-      state(conn, SSH_AUTH_PASS);
+      state(data, SSH_AUTH_PASS);
       /* FALLTHROUGH */
 
     case SSH_AUTH_PASS:
@@ -928,7 +933,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       if(rc == SSH_AUTH_SUCCESS) {
         sshc->authed = TRUE;
         infof(data, "Completed password authentication\n");
-        state(conn, SSH_AUTH_DONE);
+        state(data, SSH_AUTH_DONE);
       }
       else {
         MOVE_TO_ERROR_STATE(CURLE_LOGIN_DENIED);
@@ -947,17 +952,17 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
        */
       infof(data, "Authentication complete\n");
 
-      Curl_pgrsTime(conn->data, TIMER_APPCONNECT);      /* SSH is connected */
+      Curl_pgrsTime(data, TIMER_APPCONNECT);      /* SSH is connected */
 
       conn->sockfd = sock;
       conn->writesockfd = CURL_SOCKET_BAD;
 
       if(conn->handler->protocol == CURLPROTO_SFTP) {
-        state(conn, SSH_SFTP_INIT);
+        state(data, SSH_SFTP_INIT);
         break;
       }
       infof(data, "SSH CONNECT phase done\n");
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
 
     case SSH_SFTP_INIT:
@@ -979,7 +984,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         MOVE_TO_ERROR_STATE(sftp_error_to_CURLE(rc));
         break;
       }
-      state(conn, SSH_SFTP_REALPATH);
+      state(data, SSH_SFTP_REALPATH);
       /* FALLTHROUGH */
     case SSH_SFTP_REALPATH:
       /*
@@ -989,32 +994,31 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       if(sshc->homedir == NULL) {
         MOVE_TO_ERROR_STATE(CURLE_COULDNT_CONNECT);
       }
-      conn->data->state.most_recent_ftp_entrypath = sshc->homedir;
+      data->state.most_recent_ftp_entrypath = sshc->homedir;
 
       /* This is the last step in the SFTP connect phase. Do note that while
          we get the homedir here, we get the "workingpath" in the DO action
          since the homedir will remain the same between request but the
          working path will not. */
       DEBUGF(infof(data, "SSH CONNECT phase done\n"));
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
 
     case SSH_SFTP_QUOTE_INIT:
-
-      result = Curl_getworkingpath(conn, sshc->homedir, &protop->path);
+      result = Curl_getworkingpath(data, sshc->homedir, &protop->path);
       if(result) {
         sshc->actualcode = result;
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
         break;
       }
 
       if(data->set.quote) {
         infof(data, "Sending quote commands\n");
         sshc->quote_item = data->set.quote;
-        state(conn, SSH_SFTP_QUOTE);
+        state(data, SSH_SFTP_QUOTE);
       }
       else {
-        state(conn, SSH_SFTP_GETINFO);
+        state(data, SSH_SFTP_GETINFO);
       }
       break;
 
@@ -1022,16 +1026,16 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       if(data->set.postquote) {
         infof(data, "Sending quote commands\n");
         sshc->quote_item = data->set.postquote;
-        state(conn, SSH_SFTP_QUOTE);
+        state(data, SSH_SFTP_QUOTE);
       }
       else {
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
       }
       break;
 
     case SSH_SFTP_QUOTE:
       /* Send any quote commands */
-      sftp_quote(conn);
+      sftp_quote(data);
       break;
 
     case SSH_SFTP_NEXT_QUOTE:
@@ -1041,21 +1045,21 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       sshc->quote_item = sshc->quote_item->next;
 
       if(sshc->quote_item) {
-        state(conn, SSH_SFTP_QUOTE);
+        state(data, SSH_SFTP_QUOTE);
       }
       else {
         if(sshc->nextstate != SSH_NO_STATE) {
-          state(conn, sshc->nextstate);
+          state(data, sshc->nextstate);
           sshc->nextstate = SSH_NO_STATE;
         }
         else {
-          state(conn, SSH_SFTP_GETINFO);
+          state(data, SSH_SFTP_GETINFO);
         }
       }
       break;
 
     case SSH_SFTP_QUOTE_STAT:
-      sftp_quote_stat(conn);
+      sftp_quote_stat(data);
       break;
 
     case SSH_SFTP_QUOTE_SETSTAT:
@@ -1066,7 +1070,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path2);
         failf(data, "Attempt to set SFTP stats failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         /* sshc->actualcode = sftp_error_to_CURLE(err);
@@ -1074,7 +1078,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
          * the error the libssh2 backend is returning */
         break;
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
 
     case SSH_SFTP_QUOTE_SYMLINK:
@@ -1085,12 +1089,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path2);
         failf(data, "symlink command failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         break;
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
 
     case SSH_SFTP_QUOTE_MKDIR:
@@ -1100,12 +1104,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path1);
         failf(data, "mkdir command failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         break;
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
 
     case SSH_SFTP_QUOTE_RENAME:
@@ -1116,12 +1120,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path2);
         failf(data, "rename command failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         break;
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
 
     case SSH_SFTP_QUOTE_RMDIR:
@@ -1130,12 +1134,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path1);
         failf(data, "rmdir command failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         break;
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
 
     case SSH_SFTP_QUOTE_UNLINK:
@@ -1144,12 +1148,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path1);
         failf(data, "rm command failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         break;
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
 
     case SSH_SFTP_QUOTE_STATVFS:
@@ -1161,7 +1165,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         Curl_safefree(sshc->quote_path1);
         failf(data, "statvfs command failed: %s",
               ssh_get_error(sshc->ssh_session));
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->nextstate = SSH_NO_STATE;
         sshc->actualcode = CURLE_QUOTE_ERROR;
         break;
@@ -1184,29 +1188,29 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
         if(!tmp) {
           result = CURLE_OUT_OF_MEMORY;
-          state(conn, SSH_SFTP_CLOSE);
+          state(data, SSH_SFTP_CLOSE);
           sshc->nextstate = SSH_NO_STATE;
           break;
         }
 
-        result = Curl_client_write(conn, CLIENTWRITE_HEADER, tmp, strlen(tmp));
+        result = Curl_client_write(data, CLIENTWRITE_HEADER, tmp, strlen(tmp));
         free(tmp);
         if(result) {
-          state(conn, SSH_SFTP_CLOSE);
+          state(data, SSH_SFTP_CLOSE);
           sshc->nextstate = SSH_NO_STATE;
           sshc->actualcode = result;
         }
       }
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
       break;
     }
 
     case SSH_SFTP_GETINFO:
       if(data->set.get_filetime) {
-        state(conn, SSH_SFTP_FILETIME);
+        state(data, SSH_SFTP_FILETIME);
       }
       else {
-        state(conn, SSH_SFTP_TRANS_INIT);
+        state(data, SSH_SFTP_TRANS_INIT);
       }
       break;
 
@@ -1220,18 +1224,18 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         sftp_attributes_free(attrs);
       }
 
-      state(conn, SSH_SFTP_TRANS_INIT);
+      state(data, SSH_SFTP_TRANS_INIT);
       break;
     }
 
     case SSH_SFTP_TRANS_INIT:
       if(data->set.upload)
-        state(conn, SSH_SFTP_UPLOAD_INIT);
+        state(data, SSH_SFTP_UPLOAD_INIT);
       else {
         if(protop->path[strlen(protop->path)-1] == '/')
-          state(conn, SSH_SFTP_READDIR_INIT);
+          state(data, SSH_SFTP_READDIR_INIT);
         else
-          state(conn, SSH_SFTP_DOWNLOAD_INIT);
+          state(data, SSH_SFTP_DOWNLOAD_INIT);
       }
       break;
 
@@ -1285,7 +1289,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
                /* try to create the path remotely */
                rc = 0;
                sshc->secondCreateDirs = 1;
-               state(conn, SSH_SFTP_CREATE_DIRS_INIT);
+               state(data, SSH_SFTP_CREATE_DIRS_INIT);
                break;
         }
         else {
@@ -1368,17 +1372,17 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
          timeout here */
       Curl_expire(data, 0, EXPIRE_RUN_NOW);
 
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
     }
 
     case SSH_SFTP_CREATE_DIRS_INIT:
       if(strlen(protop->path) > 1) {
         sshc->slash_pos = protop->path + 1; /* ignore the leading '/' */
-        state(conn, SSH_SFTP_CREATE_DIRS);
+        state(data, SSH_SFTP_CREATE_DIRS);
       }
       else {
-        state(conn, SSH_SFTP_UPLOAD_INIT);
+        state(data, SSH_SFTP_UPLOAD_INIT);
       }
       break;
 
@@ -1388,10 +1392,10 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         *sshc->slash_pos = 0;
 
         infof(data, "Creating directory '%s'\n", protop->path);
-        state(conn, SSH_SFTP_CREATE_DIRS_MKDIR);
+        state(data, SSH_SFTP_CREATE_DIRS_MKDIR);
         break;
       }
-      state(conn, SSH_SFTP_UPLOAD_INIT);
+      state(data, SSH_SFTP_UPLOAD_INIT);
       break;
 
     case SSH_SFTP_CREATE_DIRS_MKDIR:
@@ -1414,13 +1418,13 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         }
         rc = 0; /* clear rc and continue */
       }
-      state(conn, SSH_SFTP_CREATE_DIRS);
+      state(data, SSH_SFTP_CREATE_DIRS);
       break;
 
     case SSH_SFTP_READDIR_INIT:
       Curl_pgrsSetDownloadSize(data, -1);
       if(data->set.opt_no_body) {
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
         break;
       }
 
@@ -1435,7 +1439,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
               ssh_get_error(sshc->ssh_session));
         MOVE_TO_SFTP_CLOSE_STATE();
       }
-      state(conn, SSH_SFTP_READDIR);
+      state(data, SSH_SFTP_READDIR);
       break;
 
     case SSH_SFTP_READDIR:
@@ -1454,16 +1458,16 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
           tmpLine = aprintf("%s\n", sshc->readdir_filename);
           if(tmpLine == NULL) {
-            state(conn, SSH_SFTP_CLOSE);
+            state(data, SSH_SFTP_CLOSE);
             sshc->actualcode = CURLE_OUT_OF_MEMORY;
             break;
           }
-          result = Curl_client_write(conn, CLIENTWRITE_BODY,
+          result = Curl_client_write(data, CLIENTWRITE_BODY,
                                      tmpLine, sshc->readdir_len + 1);
           free(tmpLine);
 
           if(result) {
-            state(conn, SSH_STOP);
+            state(data, SSH_STOP);
             break;
           }
           /* since this counts what we send to the client, we include the
@@ -1479,7 +1483,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
           sshc->readdir_totalLen = 80 + sshc->readdir_currLen;
           sshc->readdir_line = calloc(sshc->readdir_totalLen, 1);
           if(!sshc->readdir_line) {
-            state(conn, SSH_SFTP_CLOSE);
+            state(data, SSH_SFTP_CLOSE);
             sshc->actualcode = CURLE_OUT_OF_MEMORY;
             break;
           }
@@ -1491,7 +1495,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
               S_IFLNK)) {
             sshc->readdir_linkPath = malloc(PATH_MAX + 1);
             if(sshc->readdir_linkPath == NULL) {
-              state(conn, SSH_SFTP_CLOSE);
+              state(data, SSH_SFTP_CLOSE);
               sshc->actualcode = CURLE_OUT_OF_MEMORY;
               break;
             }
@@ -1499,15 +1503,15 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
             msnprintf(sshc->readdir_linkPath, PATH_MAX, "%s%s", protop->path,
                       sshc->readdir_filename);
 
-            state(conn, SSH_SFTP_READDIR_LINK);
+            state(data, SSH_SFTP_READDIR_LINK);
             break;
           }
-          state(conn, SSH_SFTP_READDIR_BOTTOM);
+          state(data, SSH_SFTP_READDIR_BOTTOM);
           break;
         }
       }
       else if(sftp_dir_eof(sshc->sftp_dir)) {
-        state(conn, SSH_SFTP_READDIR_DONE);
+        state(data, SSH_SFTP_READDIR_DONE);
         break;
       }
       else {
@@ -1554,7 +1558,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
                                           sshc->readdir_totalLen);
       if(!new_readdir_line) {
         sshc->readdir_line = NULL;
-        state(conn, SSH_SFTP_CLOSE);
+        state(data, SSH_SFTP_CLOSE);
         sshc->actualcode = CURLE_OUT_OF_MEMORY;
         break;
       }
@@ -1572,14 +1576,14 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       sshc->readdir_filename = NULL;
       sshc->readdir_longentry = NULL;
 
-      state(conn, SSH_SFTP_READDIR_BOTTOM);
+      state(data, SSH_SFTP_READDIR_BOTTOM);
       /* FALLTHROUGH */
     case SSH_SFTP_READDIR_BOTTOM:
       sshc->readdir_currLen += msnprintf(sshc->readdir_line +
                                          sshc->readdir_currLen,
                                          sshc->readdir_totalLen -
                                          sshc->readdir_currLen, "\n");
-      result = Curl_client_write(conn, CLIENTWRITE_BODY,
+      result = Curl_client_write(data, CLIENTWRITE_BODY,
                                  sshc->readdir_line,
                                  sshc->readdir_currLen);
 
@@ -1594,10 +1598,10 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       sshc->readdir_tmp = NULL;
 
       if(result) {
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
       }
       else
-        state(conn, SSH_SFTP_READDIR);
+        state(data, SSH_SFTP_READDIR);
       break;
 
     case SSH_SFTP_READDIR_DONE:
@@ -1606,7 +1610,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
       /* no data to transfer */
       Curl_setup_transfer(data, -1, -1, FALSE, -1);
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
 
     case SSH_SFTP_DOWNLOAD_INIT:
@@ -1625,7 +1629,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         MOVE_TO_SFTP_CLOSE_STATE();
       }
 
-      state(conn, SSH_SFTP_DOWNLOAD_STAT);
+      state(data, SSH_SFTP_DOWNLOAD_STAT);
       break;
 
     case SSH_SFTP_DOWNLOAD_STAT:
@@ -1657,14 +1661,14 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
           failf(data, "Bad file size (%" CURL_FORMAT_CURL_OFF_T ")", size);
           return CURLE_BAD_DOWNLOAD_RESUME;
         }
-        if(conn->data->state.use_range) {
+        if(data->state.use_range) {
           curl_off_t from, to;
           char *ptr;
           char *ptr2;
           CURLofft to_t;
           CURLofft from_t;
 
-          from_t = curlx_strtoofft(conn->data->state.range, &ptr, 0, &from);
+          from_t = curlx_strtoofft(data->state.range, &ptr, 0, &from);
           if(from_t == CURL_OFFT_FLOW) {
             return CURLE_RANGE_ERROR;
           }
@@ -1747,7 +1751,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       /* no data to transfer */
       Curl_setup_transfer(data, -1, -1, FALSE, -1);
       infof(data, "File already completely downloaded\n");
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
     }
     Curl_setup_transfer(data, FIRSTSOCKET, data->req.size, FALSE, -1);
@@ -1763,12 +1767,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
     if(result) {
       /* this should never occur; the close state should be entered
          at the time the error occurs */
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->actualcode = result;
     }
     else {
       sshc->sftp_recv_state = 0;
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
     }
     break;
 
@@ -1786,11 +1790,11 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
          SSH_SFTP_CLOSE to pass the correct result back  */
       if(sshc->nextstate != SSH_NO_STATE &&
          sshc->nextstate != SSH_SFTP_CLOSE) {
-        state(conn, sshc->nextstate);
+        state(data, sshc->nextstate);
         sshc->nextstate = SSH_SFTP_CLOSE;
       }
       else {
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
         result = sshc->actualcode;
       }
       break;
@@ -1811,17 +1815,16 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       }
 
       SSH_STRING_FREE_CHAR(sshc->homedir);
-      conn->data->state.most_recent_ftp_entrypath = NULL;
+      data->state.most_recent_ftp_entrypath = NULL;
 
-      state(conn, SSH_SESSION_DISCONNECT);
+      state(data, SSH_SESSION_DISCONNECT);
       break;
 
-
     case SSH_SCP_TRANS_INIT:
-      result = Curl_getworkingpath(conn, sshc->homedir, &protop->path);
+      result = Curl_getworkingpath(data, sshc->homedir, &protop->path);
       if(result) {
         sshc->actualcode = result;
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
         break;
       }
 
@@ -1837,17 +1840,17 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
         sshc->scp_session =
           ssh_scp_new(sshc->ssh_session, SSH_SCP_WRITE, protop->path);
-        state(conn, SSH_SCP_UPLOAD_INIT);
+        state(data, SSH_SCP_UPLOAD_INIT);
       }
       else {
         sshc->scp_session =
           ssh_scp_new(sshc->ssh_session, SSH_SCP_READ, protop->path);
-        state(conn, SSH_SCP_DOWNLOAD_INIT);
+        state(data, SSH_SCP_DOWNLOAD_INIT);
       }
 
       if(!sshc->scp_session) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_UPLOAD_FAILED);
       }
 
@@ -1855,14 +1858,14 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
     case SSH_SSH_TRANS_INIT:
       protop->size = 0;
-      result = Curl_getworkingpath(conn, sshc->homedir, &protop->path);
+      result = Curl_getworkingpath(data, sshc->homedir, &protop->path);
       if(result) {
         sshc->actualcode = result;
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
         break;
       }
 
-      /* Functions from the SCP subsystem cannot handle/return SSH_AGAIN */
+      /* Functions from the SSH subsystem cannot handle/return SSH_AGAIN */
       ssh_set_blocking(sshc->ssh_session, 1);
 
       if(data->set.upload) {
@@ -1875,11 +1878,11 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
       sshc->ssh_channel =
         ssh_channel_new(sshc->ssh_session);
-      state(conn, SSH_SSH_EXECUTE_INIT);
+      state(data, SSH_SSH_EXECUTE_INIT);
 
       if(!sshc->ssh_channel) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_UPLOAD_FAILED);
       }
 
@@ -1890,7 +1893,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       rc = ssh_scp_init(sshc->scp_session);
       if(rc != SSH_OK) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_UPLOAD_FAILED);
       }
 
@@ -1899,7 +1902,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
                              (int)data->set.new_file_perms);
       if(rc != SSH_OK) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_UPLOAD_FAILED);
       }
 
@@ -1918,7 +1921,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
          with both accordingly */
       conn->cselect_bits = CURL_CSELECT_OUT;
 
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
 
       break;
 
@@ -1927,14 +1930,14 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       rc = ssh_channel_open_session(sshc->ssh_channel);
       if(rc != SSH_OK) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_UPLOAD_FAILED);
       }
 
       rc = ssh_channel_request_exec(sshc->ssh_channel, protop->path);
       if(rc != SSH_OK) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_UPLOAD_FAILED);
       }
 
@@ -1954,7 +1957,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
          with both accordingly */
       conn->cselect_bits = CURL_CSELECT_OUT;
 
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
 
       break;
 
@@ -1963,10 +1966,10 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       rc = ssh_scp_init(sshc->scp_session);
       if(rc != SSH_OK) {
         err_msg = ssh_get_error(sshc->ssh_session);
-        failf(conn->data, "%s", err_msg);
+        failf(data, "%s", err_msg);
         MOVE_TO_ERROR_STATE(CURLE_COULDNT_CONNECT);
       }
-      state(conn, SSH_SCP_DOWNLOAD);
+      state(data, SSH_SCP_DOWNLOAD);
       /* FALLTHROUGH */
 
     case SSH_SCP_DOWNLOAD:{
@@ -1975,7 +1978,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         rc = ssh_scp_pull_request(sshc->scp_session);
         if(rc != SSH_SCP_REQUEST_NEWFILE) {
           err_msg = ssh_get_error(sshc->ssh_session);
-          failf(conn->data, "%s", err_msg);
+          failf(data, "%s", err_msg);
           MOVE_TO_ERROR_STATE(CURLE_REMOTE_FILE_NOT_FOUND);
           break;
         }
@@ -1993,21 +1996,21 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
            with both accordingly */
         conn->cselect_bits = CURL_CSELECT_IN;
 
-        state(conn, SSH_STOP);
+        state(data, SSH_STOP);
         break;
       }
     case SSH_SCP_DONE:
       if(data->set.upload)
-        state(conn, SSH_SCP_SEND_EOF);
+        state(data, SSH_SCP_SEND_EOF);
       else
-        state(conn, SSH_SCP_CHANNEL_FREE);
+        state(data, SSH_SCP_CHANNEL_FREE);
       break;
 
     case SSH_SSH_DONE:
       if(data->set.upload)
-        state(conn, SSH_SSH_SEND_EOF);
+        state(data, SSH_SSH_SEND_EOF);
       else
-        state(conn, SSH_SSH_CHANNEL_FREE);
+        state(data, SSH_SSH_CHANNEL_FREE);
       break;
 
     case SSH_SCP_SEND_EOF:
@@ -2025,7 +2028,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         }
       }
 
-      state(conn, SSH_SCP_CHANNEL_FREE);
+      state(data, SSH_SCP_CHANNEL_FREE);
       break;
 
     case SSH_SSH_SEND_EOF:
@@ -2043,7 +2046,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
         }
       }
 
-      state(conn, SSH_SSH_CHANNEL_FREE);
+      state(data, SSH_SSH_CHANNEL_FREE);
       break;
 
     case SSH_SCP_CHANNEL_FREE:
@@ -2055,7 +2058,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
       ssh_set_blocking(sshc->ssh_session, 0);
 
-      state(conn, SSH_SESSION_DISCONNECT);
+      state(data, SSH_SESSION_DISCONNECT);
       /* FALLTHROUGH */
 
     case SSH_SSH_CHANNEL_FREE:
@@ -2067,7 +2070,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
       ssh_set_blocking(sshc->ssh_session, 0);
 
-      state(conn, SSH_SESSION_DISCONNECT);
+      state(data, SSH_SESSION_DISCONNECT);
       /* FALLTHROUGH */
 
     case SSH_SESSION_DISCONNECT:
@@ -2087,9 +2090,9 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       ssh_disconnect(sshc->ssh_session);
 
       SSH_STRING_FREE_CHAR(sshc->homedir);
-      conn->data->state.most_recent_ftp_entrypath = NULL;
+      data->state.most_recent_ftp_entrypath = NULL;
 
-      state(conn, SSH_SESSION_FREE);
+      state(data, SSH_SESSION_FREE);
       /* FALLTHROUGH */
     case SSH_SESSION_FREE:
       if(sshc->ssh_session) {
@@ -2138,7 +2141,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
       connclose(conn, "SSH session free");
       sshc->state = SSH_SESSION_FREE;   /* current */
       sshc->nextstate = SSH_NO_STATE;
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
 
     case SSH_QUIT:
@@ -2146,7 +2149,7 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
     default:
       /* internal error */
       sshc->nextstate = SSH_NO_STATE;
-      state(conn, SSH_STOP);
+      state(data, SSH_STOP);
       break;
 
     }
@@ -2165,10 +2168,12 @@ static CURLcode myssh_statemach_act(struct connectdata *conn, bool *block)
 
 /* called by the multi interface to figure out what socket(s) to wait for and
    for what actions in the DO_DONE, PERFORM and WAITPERFORM states */
-static int myssh_perform_getsock(const struct connectdata *conn,
-                                 curl_socket_t *sock)
+static int myssh_getsock(struct Curl_easy *data,
+                         struct connectdata *conn,
+                         curl_socket_t *sock)
 {
   int bitmap = GETSOCK_BLANK;
+  (void)data;
   sock[0] = conn->sock[FIRSTSOCKET];
 
   if(conn->waitfor & KEEP_RECV)
@@ -2178,16 +2183,6 @@ static int myssh_perform_getsock(const struct connectdata *conn,
     bitmap |= GETSOCK_WRITESOCK(FIRSTSOCKET);
 
   return bitmap;
-}
-
-/* Generic function called by the multi interface to figure out what socket(s)
-   to wait for and for what actions during the DOING and PROTOCONNECT states*/
-static int myssh_getsock(struct connectdata *conn,
-                         curl_socket_t *sock)
-{
-  /* if we know the direction we can use the generic *_getsock() function even
-     for the protocol_connect and doing states */
-  return myssh_perform_getsock(conn, sock);
 }
 
 static void myssh_block2waitfor(struct connectdata *conn, bool block)
@@ -2211,13 +2206,14 @@ static void myssh_block2waitfor(struct connectdata *conn, bool block)
 }
 
 /* called repeatedly until done from multi.c */
-static CURLcode myssh_multi_statemach(struct connectdata *conn,
+static CURLcode myssh_multi_statemach(struct Curl_easy *data,
                                       bool *done)
 {
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
   bool block;    /* we store the status and use that to provide a ssh_getsock()
                     implementation */
-  CURLcode result = myssh_statemach_act(conn, &block);
+  CURLcode result = myssh_statemach_act(data, &block);
 
   *done = (sshc->state == SSH_STOP) ? TRUE : FALSE;
   myssh_block2waitfor(conn, block);
@@ -2225,24 +2221,24 @@ static CURLcode myssh_multi_statemach(struct connectdata *conn,
   return result;
 }
 
-static CURLcode myssh_block_statemach(struct connectdata *conn,
+static CURLcode myssh_block_statemach(struct Curl_easy *data,
                                       bool disconnect)
 {
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
   CURLcode result = CURLE_OK;
-  struct Curl_easy *data = conn->data;
 
   while((sshc->state != SSH_STOP) && !result) {
     bool block;
     timediff_t left = 1000;
     struct curltime now = Curl_now();
 
-    result = myssh_statemach_act(conn, &block);
+    result = myssh_statemach_act(data, &block);
     if(result)
       break;
 
     if(!disconnect) {
-      if(Curl_pgrsUpdate(conn))
+      if(Curl_pgrsUpdate(data))
         return CURLE_ABORTED_BY_CALLBACK;
 
       result = Curl_speedcheck(data, now);
@@ -2271,11 +2267,13 @@ static CURLcode myssh_block_statemach(struct connectdata *conn,
 /*
  * SSH setup connection
  */
-static CURLcode myssh_setup_connection(struct connectdata *conn)
+static CURLcode myssh_setup_connection(struct Curl_easy *data,
+                                       struct connectdata *conn)
 {
   struct SSHPROTO *ssh;
+  (void)conn;
 
-  conn->data->req.p.ssh = ssh = calloc(1, sizeof(struct SSHPROTO));
+  data->req.p.ssh = ssh = calloc(1, sizeof(struct SSHPROTO));
   if(!ssh)
     return CURLE_OUT_OF_MEMORY;
 
@@ -2289,17 +2287,17 @@ static Curl_send scp_send, ssh_send, sftp_send;
  * Curl_ssh_connect() gets called from Curl_protocol_connect() to allow us to
  * do protocol-specific actions at connect-time.
  */
-static CURLcode myssh_connect(struct connectdata *conn, bool *done)
+static CURLcode myssh_connect(struct Curl_easy *data, bool *done)
 {
   struct ssh_conn *ssh;
   CURLcode result;
+  struct connectdata *conn = data->conn;
   curl_socket_t sock = conn->sock[FIRSTSOCKET];
-  struct Curl_easy *data = conn->data;
   int rc;
 
   /* initialize per-handle data if not already */
   if(!data->req.p.ssh)
-    myssh_setup_connection(conn);
+    myssh_setup_connection(data, conn);
 
   /* We default to persistent connections. We set this already in this connect
      function to make the re-use checks properly be able to check this bit. */
@@ -2396,35 +2394,35 @@ static CURLcode myssh_connect(struct connectdata *conn, bool *done)
   /* we do not verify here, we do it at the state machine,
    * after connection */
 
-  state(conn, SSH_INIT);
+  state(data, SSH_INIT);
 
-  result = myssh_multi_statemach(conn, done);
+  result = myssh_multi_statemach(data, done);
 
   return result;
 }
 
 /* called from multi.c while DOing */
-static CURLcode scp_doing(struct connectdata *conn, bool *dophase_done)
+static CURLcode scp_doing(struct Curl_easy *data, bool *dophase_done)
 {
   CURLcode result;
 
-  result = myssh_multi_statemach(conn, dophase_done);
+  result = myssh_multi_statemach(data, dophase_done);
 
   if(*dophase_done) {
-    DEBUGF(infof(conn->data, "DO phase is complete\n"));
+    DEBUGF(infof(data, "DO phase is complete\n"));
   }
   return result;
 }
 
 /* called from multi.c while DOing */
-static CURLcode ssh_doing(struct connectdata *conn, bool *dophase_done)
+static CURLcode ssh_doing(struct Curl_easy *data, bool *dophase_done)
 {
   CURLcode result;
 
-  result = myssh_multi_statemach(conn, dophase_done);
+  result = myssh_multi_statemach(data, dophase_done);
 
   if(*dophase_done) {
-    DEBUGF(infof(conn->data, "DO phase is complete\n"));
+    DEBUGF(infof(data, "DO phase is complete\n"));
   }
   return result;
 }
@@ -2439,58 +2437,60 @@ static CURLcode ssh_doing(struct connectdata *conn, bool *dophase_done)
  */
 
 static
-CURLcode scp_perform(struct connectdata *conn,
+CURLcode scp_perform(struct Curl_easy *data,
                      bool *connected, bool *dophase_done)
 {
   CURLcode result = CURLE_OK;
+  struct connectdata *conn = data->conn;
 
-  DEBUGF(infof(conn->data, "DO phase starts\n"));
+  DEBUGF(infof(data, "DO phase starts\n"));
 
   *dophase_done = FALSE;        /* not done yet */
 
   /* start the first command in the DO phase */
-  state(conn, SSH_SCP_TRANS_INIT);
+  state(data, SSH_SCP_TRANS_INIT);
 
-  result = myssh_multi_statemach(conn, dophase_done);
+  result = myssh_multi_statemach(data, dophase_done);
 
   *connected = conn->bits.tcpconnect[FIRSTSOCKET];
 
   if(*dophase_done) {
-    DEBUGF(infof(conn->data, "DO phase is complete\n"));
+    DEBUGF(infof(data, "DO phase is complete\n"));
   }
 
   return result;
 }
 
 static
-CURLcode ssh_perform(struct connectdata *conn,
+CURLcode ssh_perform(struct Curl_easy *data,
                      bool *connected, bool *dophase_done)
 {
   CURLcode result = CURLE_OK;
+  struct connectdata *conn = data->conn;
 
-  DEBUGF(infof(conn->data, "DO phase starts\n"));
+  DEBUGF(infof(data, "DO phase starts\n"));
 
   *dophase_done = FALSE;        /* not done yet */
 
   /* start the first command in the DO phase */
-  state(conn, SSH_SSH_TRANS_INIT);
+  state(data, SSH_SSH_TRANS_INIT);
 
-  result = myssh_multi_statemach(conn, dophase_done);
+  result = myssh_multi_statemach(data, dophase_done);
 
   *connected = conn->bits.tcpconnect[FIRSTSOCKET];
 
   if(*dophase_done) {
-    DEBUGF(infof(conn->data, "DO phase is complete\n"));
+    DEBUGF(infof(data, "DO phase is complete\n"));
   }
 
   return result;
 }
 
-static CURLcode myssh_do_it(struct connectdata *conn, bool *done)
+static CURLcode myssh_do_it(struct Curl_easy *data, bool *done)
 {
   CURLcode result;
   bool connected = 0;
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
 
   *done = FALSE;                /* default to false */
@@ -2507,11 +2507,11 @@ static CURLcode myssh_do_it(struct connectdata *conn, bool *done)
   Curl_pgrsSetDownloadSize(data, -1);
 
   if(conn->handler->protocol & CURLPROTO_SCP)
-    result = scp_perform(conn, &connected, done);
+    result = scp_perform(data, &connected, done);
   else if(conn->handler->protocol & CURLPROTO_SSH)
-    result = ssh_perform(conn, &connected, done);
+    result = ssh_perform(data, &connected, done);
   else
-    result = sftp_perform(conn, &connected, done);
+    result = sftp_perform(data, &connected, done);
 
   return result;
 }
@@ -2519,7 +2519,8 @@ static CURLcode myssh_do_it(struct connectdata *conn, bool *done)
 /* BLOCKING, but the function is using the state machine so the only reason
    this is still blocking is that the multi interface code has no support for
    disconnecting operations that takes a while */
-static CURLcode scp_disconnect(struct connectdata *conn,
+static CURLcode scp_disconnect(struct Curl_easy *data,
+                               struct connectdata *conn,
                                bool dead_connection)
 {
   CURLcode result = CURLE_OK;
@@ -2529,9 +2530,9 @@ static CURLcode scp_disconnect(struct connectdata *conn,
   if(ssh->ssh_session) {
     /* only if there's a session still around to use! */
 
-    state(conn, SSH_SESSION_DISCONNECT);
+    state(data, SSH_SESSION_DISCONNECT);
 
-    result = myssh_block_statemach(conn, TRUE);
+    result = myssh_block_statemach(data, TRUE);
   }
 
   return result;
@@ -2540,7 +2541,8 @@ static CURLcode scp_disconnect(struct connectdata *conn,
 /* BLOCKING, but the function is using the state machine so the only reason
    this is still blocking is that the multi interface code has no support for
    disconnecting operations that takes a while */
-static CURLcode ssh_disconnect1(struct connectdata *conn,
+static CURLcode ssh_disconnect1(struct Curl_easy *data,
+                               struct connectdata *conn,
                                bool dead_connection)
 {
   CURLcode result = CURLE_OK;
@@ -2550,9 +2552,9 @@ static CURLcode ssh_disconnect1(struct connectdata *conn,
   if(ssh->ssh_session) {
     /* only if there's a session still around to use! */
 
-    state(conn, SSH_SESSION_DISCONNECT);
+    state(data, SSH_SESSION_DISCONNECT);
 
-    result = myssh_block_statemach(conn, TRUE);
+    result = myssh_block_statemach(data, TRUE);
   }
 
   return result;
@@ -2560,56 +2562,57 @@ static CURLcode ssh_disconnect1(struct connectdata *conn,
 
 /* generic done function for both SCP and SFTP called from their specific
    done functions */
-static CURLcode myssh_done(struct connectdata *conn, CURLcode status)
+static CURLcode myssh_done(struct Curl_easy *data, CURLcode status)
 {
   CURLcode result = CURLE_OK;
-  struct SSHPROTO *protop = conn->data->req.p.ssh;
+  struct SSHPROTO *protop = data->req.p.ssh;
 
   if(!status) {
     /* run the state-machine */
-    result = myssh_block_statemach(conn, FALSE);
+    result = myssh_block_statemach(data, FALSE);
   }
   else
     result = status;
 
   if(protop)
     Curl_safefree(protop->path);
-  if(Curl_pgrsDone(conn))
+  if(Curl_pgrsDone(data))
     return CURLE_ABORTED_BY_CALLBACK;
 
-  conn->data->req.keepon = 0;   /* clear all bits */
+  data->req.keepon = 0;   /* clear all bits */
   return result;
 }
 
 
-static CURLcode scp_done(struct connectdata *conn, CURLcode status,
+static CURLcode scp_done(struct Curl_easy *data, CURLcode status,
                          bool premature)
 {
   (void) premature;             /* not used */
 
   if(!status)
-    state(conn, SSH_SCP_DONE);
+    state(data, SSH_SCP_DONE);
 
-  return myssh_done(conn, status);
+  return myssh_done(data, status);
 
 }
 
-static CURLcode ssh_done(struct connectdata *conn, CURLcode status,
+static CURLcode ssh_done(struct Curl_easy *data, CURLcode status,
                          bool premature)
 {
   (void) premature;             /* not used */
 
   if(!status)
-    state(conn, SSH_SSH_DONE);
+    state(data, SSH_SSH_DONE);
 
-  return myssh_done(conn, status);
+  return myssh_done(data, status);
 
 }
 
-static ssize_t scp_send(struct connectdata *conn, int sockindex,
+static ssize_t scp_send(struct Curl_easy *data, int sockindex,
                         const void *mem, size_t len, CURLcode *err)
 {
   int rc;
+  struct connectdata *conn = data->conn;
   (void) sockindex; /* we only support SCP on the fixed known primary socket */
   (void) err;
 
@@ -2635,11 +2638,11 @@ static ssize_t scp_send(struct connectdata *conn, int sockindex,
   return len;
 }
 
-static ssize_t ssh_send(struct connectdata *conn, int sockindex,
+static ssize_t ssh_send(struct Curl_easy *data, int sockindex,
                         const void *mem, size_t len, CURLcode *err)
 {
   int rc;
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct SSHPROTO *protop = data->req.p.ssh;
   (void) sockindex; /* we only support SCP on the fixed known primary socket */
   (void) err;
@@ -2672,10 +2675,11 @@ static ssize_t ssh_send(struct connectdata *conn, int sockindex,
   return len;
 }
 
-static ssize_t scp_recv(struct connectdata *conn, int sockindex,
+static ssize_t scp_recv(struct Curl_easy *data, int sockindex,
                         char *mem, size_t len, CURLcode *err)
 {
   ssize_t nread;
+  struct connectdata *conn = data->conn;
   (void) err;
   (void) sockindex; /* we only support SCP on the fixed known primary socket */
 
@@ -2697,10 +2701,11 @@ static ssize_t scp_recv(struct connectdata *conn, int sockindex,
   return nread;
 }
 
-static ssize_t ssh_recv(struct connectdata *conn, int sockindex,
+static ssize_t ssh_recv(struct Curl_easy *data, int sockindex,
                         char *mem, size_t len, CURLcode *err)
 {
   ssize_t nread;
+  struct connectdata *conn = data->conn;
   (void) err;
   (void) sockindex; /* we only support SCP on the fixed known primary socket */
 
@@ -2737,38 +2742,39 @@ static ssize_t ssh_recv(struct connectdata *conn, int sockindex,
  */
 
 static
-CURLcode sftp_perform(struct connectdata *conn,
+CURLcode sftp_perform(struct Curl_easy *data,
                       bool *connected,
                       bool *dophase_done)
 {
   CURLcode result = CURLE_OK;
+  struct connectdata *conn = data->conn;
 
-  DEBUGF(infof(conn->data, "DO phase starts\n"));
+  DEBUGF(infof(data, "DO phase starts\n"));
 
   *dophase_done = FALSE; /* not done yet */
 
   /* start the first command in the DO phase */
-  state(conn, SSH_SFTP_QUOTE_INIT);
+  state(data, SSH_SFTP_QUOTE_INIT);
 
   /* run the state-machine */
-  result = myssh_multi_statemach(conn, dophase_done);
+  result = myssh_multi_statemach(data, dophase_done);
 
   *connected = conn->bits.tcpconnect[FIRSTSOCKET];
 
   if(*dophase_done) {
-    DEBUGF(infof(conn->data, "DO phase is complete\n"));
+    DEBUGF(infof(data, "DO phase is complete\n"));
   }
 
   return result;
 }
 
 /* called from multi.c while DOing */
-static CURLcode sftp_doing(struct connectdata *conn,
+static CURLcode sftp_doing(struct Curl_easy *data,
                            bool *dophase_done)
 {
-  CURLcode result = myssh_multi_statemach(conn, dophase_done);
+  CURLcode result = myssh_multi_statemach(data, dophase_done);
   if(*dophase_done) {
-    DEBUGF(infof(conn->data, "DO phase is complete\n"));
+    DEBUGF(infof(data, "DO phase is complete\n"));
   }
   return result;
 }
@@ -2776,46 +2782,50 @@ static CURLcode sftp_doing(struct connectdata *conn,
 /* BLOCKING, but the function is using the state machine so the only reason
    this is still blocking is that the multi interface code has no support for
    disconnecting operations that takes a while */
-static CURLcode sftp_disconnect(struct connectdata *conn, bool dead_connection)
+static CURLcode sftp_disconnect(struct Curl_easy *data,
+                                struct connectdata *conn,
+                                bool dead_connection)
 {
   CURLcode result = CURLE_OK;
   (void) dead_connection;
 
-  DEBUGF(infof(conn->data, "SSH DISCONNECT starts now\n"));
+  DEBUGF(infof(data, "SSH DISCONNECT starts now\n"));
 
   if(conn->proto.sshc.ssh_session) {
     /* only if there's a session still around to use! */
-    state(conn, SSH_SFTP_SHUTDOWN);
-    result = myssh_block_statemach(conn, TRUE);
+    state(data, SSH_SFTP_SHUTDOWN);
+    result = myssh_block_statemach(data, TRUE);
   }
 
-  DEBUGF(infof(conn->data, "SSH DISCONNECT is done\n"));
+  DEBUGF(infof(data, "SSH DISCONNECT is done\n"));
 
   return result;
 
 }
 
-static CURLcode sftp_done(struct connectdata *conn, CURLcode status,
-                               bool premature)
+static CURLcode sftp_done(struct Curl_easy *data, CURLcode status,
+                          bool premature)
 {
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
 
   if(!status) {
     /* Post quote commands are executed after the SFTP_CLOSE state to avoid
        errors that could happen due to open file handles during POSTQUOTE
        operation */
-    if(!premature && conn->data->set.postquote && !conn->bits.retry)
+    if(!premature && data->set.postquote && !conn->bits.retry)
       sshc->nextstate = SSH_SFTP_POSTQUOTE_INIT;
-    state(conn, SSH_SFTP_CLOSE);
+    state(data, SSH_SFTP_CLOSE);
   }
-  return myssh_done(conn, status);
+  return myssh_done(data, status);
 }
 
 /* return number of sent bytes */
-static ssize_t sftp_send(struct connectdata *conn, int sockindex,
+static ssize_t sftp_send(struct Curl_easy *data, int sockindex,
                          const void *mem, size_t len, CURLcode *err)
 {
   ssize_t nwrite;
+  struct connectdata *conn = data->conn;
   (void)sockindex;
 
   nwrite = sftp_write(conn->proto.sshc.sftp_file, mem, len);
@@ -2841,10 +2851,11 @@ static ssize_t sftp_send(struct connectdata *conn, int sockindex,
  * Return number of received (decrypted) bytes
  * or <0 on error
  */
-static ssize_t sftp_recv(struct connectdata *conn, int sockindex,
+static ssize_t sftp_recv(struct Curl_easy *data, int sockindex,
                          char *mem, size_t len, CURLcode *err)
 {
   ssize_t nread;
+  struct connectdata *conn = data->conn;
   (void)sockindex;
 
   DEBUGASSERT(len < CURL_MAX_READ_SIZE);
@@ -2852,8 +2863,8 @@ static ssize_t sftp_recv(struct connectdata *conn, int sockindex,
   switch(conn->proto.sshc.sftp_recv_state) {
     case 0:
       conn->proto.sshc.sftp_file_index =
-            sftp_async_read_begin(conn->proto.sshc.sftp_file,
-                                  (uint32_t)len);
+        sftp_async_read_begin(conn->proto.sshc.sftp_file,
+                              (uint32_t)len);
       if(conn->proto.sshc.sftp_file_index < 0) {
         *err = CURLE_RECV_ERROR;
         return -1;
@@ -2887,10 +2898,10 @@ static ssize_t sftp_recv(struct connectdata *conn, int sockindex,
   }
 }
 
-static void sftp_quote(struct connectdata *conn)
+static void sftp_quote(struct Curl_easy *data)
 {
   const char *cp;
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct SSHPROTO *protop = data->req.p.ssh;
   struct ssh_conn *sshc = &conn->proto.sshc;
   CURLcode result;
@@ -2917,7 +2928,7 @@ static void sftp_quote(struct connectdata *conn)
                         protop->path);
     if(!tmp) {
       sshc->actualcode = CURLE_OUT_OF_MEMORY;
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       return;
     }
@@ -2927,15 +2938,15 @@ static void sftp_quote(struct connectdata *conn)
     /* this sends an FTP-like "header" to the header callback so that the
        current directory can be read very similar to how it is read when
        using ordinary FTP. */
-    result = Curl_client_write(conn, CLIENTWRITE_HEADER, tmp, strlen(tmp));
+    result = Curl_client_write(data, CLIENTWRITE_HEADER, tmp, strlen(tmp));
     free(tmp);
     if(result) {
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = result;
     }
     else
-      state(conn, SSH_SFTP_NEXT_QUOTE);
+      state(data, SSH_SFTP_NEXT_QUOTE);
     return;
   }
 
@@ -2946,7 +2957,7 @@ static void sftp_quote(struct connectdata *conn)
   cp = strchr(cmd, ' ');
   if(cp == NULL) {
     failf(data, "Syntax error in SFTP command. Supply parameter(s)!");
-    state(conn, SSH_SFTP_CLOSE);
+    state(data, SSH_SFTP_CLOSE);
     sshc->nextstate = SSH_NO_STATE;
     sshc->actualcode = CURLE_QUOTE_ERROR;
     return;
@@ -2962,7 +2973,7 @@ static void sftp_quote(struct connectdata *conn)
       failf(data, "Out of memory");
     else
       failf(data, "Syntax error: Bad first parameter");
-    state(conn, SSH_SFTP_CLOSE);
+    state(data, SSH_SFTP_CLOSE);
     sshc->nextstate = SSH_NO_STATE;
     sshc->actualcode = result;
     return;
@@ -2991,13 +3002,13 @@ static void sftp_quote(struct connectdata *conn)
         failf(data, "Syntax error in chgrp/chmod/chown/atime/mtime: "
               "Bad second parameter");
       Curl_safefree(sshc->quote_path1);
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = result;
       return;
     }
     sshc->quote_attrs = NULL;
-    state(conn, SSH_SFTP_QUOTE_STAT);
+    state(data, SSH_SFTP_QUOTE_STAT);
     return;
   }
   if(strncasecompare(cmd, "ln ", 3) ||
@@ -3012,17 +3023,17 @@ static void sftp_quote(struct connectdata *conn)
       else
         failf(data, "Syntax error in ln/symlink: Bad second parameter");
       Curl_safefree(sshc->quote_path1);
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = result;
       return;
     }
-    state(conn, SSH_SFTP_QUOTE_SYMLINK);
+    state(data, SSH_SFTP_QUOTE_SYMLINK);
     return;
   }
   else if(strncasecompare(cmd, "mkdir ", 6)) {
     /* create dir */
-    state(conn, SSH_SFTP_QUOTE_MKDIR);
+    state(data, SSH_SFTP_QUOTE_MKDIR);
     return;
   }
   else if(strncasecompare(cmd, "rename ", 7)) {
@@ -3036,26 +3047,26 @@ static void sftp_quote(struct connectdata *conn)
       else
         failf(data, "Syntax error in rename: Bad second parameter");
       Curl_safefree(sshc->quote_path1);
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = result;
       return;
     }
-    state(conn, SSH_SFTP_QUOTE_RENAME);
+    state(data, SSH_SFTP_QUOTE_RENAME);
     return;
   }
   else if(strncasecompare(cmd, "rmdir ", 6)) {
     /* delete dir */
-    state(conn, SSH_SFTP_QUOTE_RMDIR);
+    state(data, SSH_SFTP_QUOTE_RMDIR);
     return;
   }
   else if(strncasecompare(cmd, "rm ", 3)) {
-    state(conn, SSH_SFTP_QUOTE_UNLINK);
+    state(data, SSH_SFTP_QUOTE_UNLINK);
     return;
   }
 #ifdef HAS_STATVFS_SUPPORT
   else if(strncasecompare(cmd, "statvfs ", 8)) {
-    state(conn, SSH_SFTP_QUOTE_STATVFS);
+    state(data, SSH_SFTP_QUOTE_STATVFS);
     return;
   }
 #endif
@@ -3063,14 +3074,14 @@ static void sftp_quote(struct connectdata *conn)
   failf(data, "Unknown SFTP command");
   Curl_safefree(sshc->quote_path1);
   Curl_safefree(sshc->quote_path2);
-  state(conn, SSH_SFTP_CLOSE);
+  state(data, SSH_SFTP_CLOSE);
   sshc->nextstate = SSH_NO_STATE;
   sshc->actualcode = CURLE_QUOTE_ERROR;
 }
 
-static void sftp_quote_stat(struct connectdata *conn)
+static void sftp_quote_stat(struct Curl_easy *data)
 {
-  struct Curl_easy *data = conn->data;
+  struct connectdata *conn = data->conn;
   struct ssh_conn *sshc = &conn->proto.sshc;
   char *cmd = sshc->quote_item->data;
   sshc->acceptfail = FALSE;
@@ -3098,7 +3109,7 @@ static void sftp_quote_stat(struct connectdata *conn)
     Curl_safefree(sshc->quote_path2);
     failf(data, "Attempt to get SFTP stats failed: %d",
           sftp_get_error(sshc->sftp_session));
-    state(conn, SSH_SFTP_CLOSE);
+    state(data, SSH_SFTP_CLOSE);
     sshc->nextstate = SSH_NO_STATE;
     sshc->actualcode = CURLE_QUOTE_ERROR;
     return;
@@ -3112,7 +3123,7 @@ static void sftp_quote_stat(struct connectdata *conn)
       Curl_safefree(sshc->quote_path1);
       Curl_safefree(sshc->quote_path2);
       failf(data, "Syntax error: chgrp gid not a number");
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = CURLE_QUOTE_ERROR;
       return;
@@ -3127,7 +3138,7 @@ static void sftp_quote_stat(struct connectdata *conn)
       Curl_safefree(sshc->quote_path1);
       Curl_safefree(sshc->quote_path2);
       failf(data, "Syntax error: chmod permissions not a number");
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = CURLE_QUOTE_ERROR;
       return;
@@ -3142,7 +3153,7 @@ static void sftp_quote_stat(struct connectdata *conn)
       Curl_safefree(sshc->quote_path1);
       Curl_safefree(sshc->quote_path2);
       failf(data, "Syntax error: chown uid not a number");
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = CURLE_QUOTE_ERROR;
       return;
@@ -3155,7 +3166,7 @@ static void sftp_quote_stat(struct connectdata *conn)
       Curl_safefree(sshc->quote_path1);
       Curl_safefree(sshc->quote_path2);
       failf(data, "Syntax error: incorrect access date format");
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = CURLE_QUOTE_ERROR;
       return;
@@ -3169,7 +3180,7 @@ static void sftp_quote_stat(struct connectdata *conn)
       Curl_safefree(sshc->quote_path1);
       Curl_safefree(sshc->quote_path2);
       failf(data, "Syntax error: incorrect modification date format");
-      state(conn, SSH_SFTP_CLOSE);
+      state(data, SSH_SFTP_CLOSE);
       sshc->nextstate = SSH_NO_STATE;
       sshc->actualcode = CURLE_QUOTE_ERROR;
       return;
@@ -3179,7 +3190,7 @@ static void sftp_quote_stat(struct connectdata *conn)
   }
 
   /* Now send the completed structure... */
-  state(conn, SSH_SFTP_QUOTE_SETSTAT);
+  state(data, SSH_SFTP_QUOTE_SETSTAT);
   return;
 }
 
